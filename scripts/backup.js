@@ -1,0 +1,1 @@
+const fs=require('fs'),path=require('path');const root=path.resolve(__dirname,'..');const db=path.join(root,'database/cds-contabil-connect.db');if(!fs.existsSync(db)){console.error('Banco não encontrado.');process.exit(1)}const dest=path.join(root,'backups',`backup-${new Date().toISOString().replace(/[:.]/g,'-')}.db`);fs.copyFileSync(db,dest);console.log(dest);

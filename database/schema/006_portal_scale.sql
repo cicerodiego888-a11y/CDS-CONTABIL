@@ -1,0 +1,9 @@
+CREATE INDEX IF NOT EXISTS idx_companies_tenant_name ON companies(tenant_id,name);
+CREATE INDEX IF NOT EXISTS idx_companies_tenant_cnpj ON companies(tenant_id,cnpj);
+CREATE INDEX IF NOT EXISTS idx_companies_tenant_created ON companies(tenant_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_documents_tenant_company ON documents(tenant_id,company_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_expenses_document ON expenses(tenant_id,document_id);
+CREATE INDEX IF NOT EXISTS idx_revenues_document ON revenues(tenant_id,document_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_status ON expenses(tenant_id,company_id,status,occurred_on);
+CREATE INDEX IF NOT EXISTS idx_revenues_status ON revenues(tenant_id,company_id,status,occurred_on);
+CREATE INDEX IF NOT EXISTS idx_notifications_tenant_user ON notifications(tenant_id,user_id,created_at);

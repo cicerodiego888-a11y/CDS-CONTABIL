@@ -1,0 +1,21 @@
+# Checklist de implantação
+
+- [ ] Node.js 20 ou superior instalado
+- [ ] `npm install` executado sem erros
+- [ ] `.env` criado a partir de `.env.example`
+- [ ] `JWT_SECRET` alterado
+- [ ] `npm run setup`
+- [ ] `npm run seed` somente para ambiente de demonstração
+- [ ] `npm test`
+- [ ] Login testado
+- [ ] Escritório e empresas cadastrados
+- [ ] Plano de contas importado e revisado
+- [ ] Categorias vinculadas a contas analíticas
+- [ ] Bancos vinculados às contas financeiras
+- [ ] Regras contábeis criadas e simuladas
+- [ ] Uma despesa de teste criada
+- [ ] Classificação conferida
+- [ ] Lançamento efetivado na aprovação
+- [ ] Exportação de teste gerada
+- [ ] Arquivo importado/homologado no software contábil destino
+- [ ] Backup inicial criado com `npm run backup`

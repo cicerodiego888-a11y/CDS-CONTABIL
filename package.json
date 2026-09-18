@@ -1,0 +1,27 @@
+{
+  "name": "cds-contabil-connect",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CDS Contábil Connect - SaaS de integração entre empresas e escritórios contábeis",
+  "main": "backend/src/server.js",
+  "scripts": {
+    "start": "node backend/src/server.js",
+    "dev": "node --watch backend/src/server.js",
+    "setup": "node scripts/setup.js",
+    "seed": "node scripts/seed.js && node scripts/seed-client.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
+    "backup": "node scripts/backup.js",
+    "import:plan": "node scripts/import-plan-contas.js",
+    "validate:plan": "node scripts/validate-plan-contas.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "better-sqlite3": "^12.2.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "pdf-parse": "^1.1.1"
+  }
+}

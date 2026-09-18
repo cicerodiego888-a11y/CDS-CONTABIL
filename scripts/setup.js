@@ -1,0 +1,1 @@
+const fs=require('fs'),path=require('path');const root=path.resolve(__dirname,'..');for(const d of ['database','uploads/documentos','uploads/planos-contas','exports','backups','logs'])fs.mkdirSync(path.join(root,d),{recursive:true});require(path.join(root,'backend/src/server.js'));console.log('Banco e diretórios preparados.');
