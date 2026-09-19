@@ -1,1 +1,46 @@
-const {db}=require('../backend/src/server');const bcrypt=require('bcryptjs');const crypto=require('crypto');const id=()=>crypto.randomUUID();const exists=db.prepare('SELECT id FROM users WHERE lower(email)=lower(?)').get('admin@demo.local');if(exists){console.log('Seed já aplicado.');process.exit(0)}const t=id(),u=id(),c=id(),p=id();db.transaction(()=>{db.prepare('INSERT INTO tenants(id,name,cnpj,slug) VALUES(?,?,?,?)').run(t,'Escritório Demonstração','00.000.000/0001-00','demo');db.prepare('INSERT INTO users(id,tenant_id,name,email,password_hash,role) VALUES(?,?,?,?,?,?)').run(u,t,'Administrador','admin@demo.local',bcrypt.hashSync('Admin@123',12),'OWNER');db.prepare('INSERT INTO companies(id,tenant_id,name,cnpj) VALUES(?,?,?,?)').run(c,t,'Empresa Demonstração','11.111.111/0001-11');db.prepare('INSERT INTO account_plans(id,tenant_id,name,status) VALUES(?,?,?,?)').run(p,t,'Plano Demo','ACTIVE');const acc=[['1110100001','A','CAIXA GERAL'],['1110200001','A','BANCO DO BRASIL'],['3210100012','A','COMBUSTIVEL'],['3210400001','A','FRETES E CARRETOS'],['3210600008','A','ENERGIA ELÉTRICA'],['3210600011','A','DESPESAS COM INTERNET'],['3230400008','A','HONORÁRIOS CONTÁBEIS'],['3230400009','A','SERVIÇOS PRESTADOS POR TERCEIROS'],['3220100010','A','TARIFA BANCARIA'],['1120100001','A','CLIENTES DIVERSOS'],['4110100001','A','RECEITA DE VENDAS']];for(const [code,type,desc] of acc)db.prepare('INSERT INTO accounts(id,tenant_id,plan_id,account_code,classification_code,account_type,description,is_postable) VALUES(?,?,?,?,?,?,?,1)').run(id(),t,p,code,code,type,desc);const bank=db.prepare("SELECT id FROM accounts WHERE tenant_id=? AND account_code='1110200001'").get(t).id;const fuel=db.prepare("SELECT id FROM accounts WHERE tenant_id=? AND account_code='3210100012'").get(t).id;const freight=db.prepare("SELECT id FROM accounts WHERE tenant_id=? AND account_code='3210400001'").get(t).id;const rev=db.prepare("SELECT id FROM accounts WHERE tenant_id=? AND account_code='4110100001'").get(t).id;db.prepare('INSERT INTO banks(id,tenant_id,company_id,name,account_id) VALUES(?,?,?,?,?)').run(id(),t,c,'Banco do Brasil',bank);db.prepare('INSERT INTO categories(id,tenant_id,company_id,name,kind,account_id) VALUES(?,?,?,?,?,?)').run(id(),t,c,'Combustível','EXPENSE',fuel);db.prepare('INSERT INTO categories(id,tenant_id,company_id,name,kind,account_id) VALUES(?,?,?,?,?,?)').run(id(),t,c,'Frete','EXPENSE',freight);db.prepare('INSERT INTO categories(id,tenant_id,company_id,name,kind,account_id) VALUES(?,?,?,?,?,?)').run(id(),t,c,'Vendas','REVENUE',rev); db.prepare('INSERT INTO accounting_rules(id,tenant_id,company_id,name,priority,conditions_json,debit_account_id,credit_account_id,confidence) VALUES(?,?,?,?,?,?,?,?,?)').run(id(),t,c,'Frete pago por PIX',10,JSON.stringify({description:'frete',payment_method:'PIX'}),freight,bank,1);})();console.log('Seed concluído. Escritório: demo / admin@demo.local / Admin@123');
+'use strict';
+
+const path = require('path');
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+const { loadConfig } = require('../backend/src/config');
+const config = loadConfig(process.env);
+
+if (!config.DEMO_MODE) {
+  console.log('Seed de demonstração ignorado (DEMO_MODE=false).');
+  process.exit(0);
+}
+
+const { db } = require('../backend/src/server');
+const id = () => crypto.randomUUID();
+
+const tenant = db.prepare("SELECT * FROM tenants WHERE slug='escritorio-demonstracao'").get()
+  || db.prepare("SELECT * FROM tenants WHERE lower(name) LIKE '%demonstr%'").get();
+
+let tenantId = tenant && tenant.id;
+if (!tenantId) {
+  tenantId = id();
+  db.prepare('INSERT INTO tenants(id,name,slug) VALUES(?,?,?)').run(tenantId, 'Escritório Demonstração', 'escritorio-demonstracao');
+} else if (!tenant.slug) {
+  db.prepare("UPDATE tenants SET slug='escritorio-demonstracao' WHERE id=?").run(tenantId);
+}
+
+const email = 'admin@demo.local';
+let owner = db.prepare('SELECT * FROM users WHERE tenant_id=? AND lower(email)=?').get(tenantId, email);
+if (!owner) {
+  const uid = id();
+  db.prepare('INSERT INTO users(id,tenant_id,name,email,password_hash,role,active) VALUES(?,?,?,?,?,?,1)')
+    .run(uid, tenantId, 'Administrador Demo', email, bcrypt.hashSync('Admin@123', 12), 'OWNER');
+  owner = { id: uid };
+}
+
+let company = db.prepare('SELECT * FROM companies WHERE tenant_id=? ORDER BY created_at LIMIT 1').get(tenantId);
+if (!company) {
+  const cid = id();
+  db.prepare('INSERT INTO companies(id,tenant_id,name,trade_name,status) VALUES(?,?,?,?,?)')
+    .run(cid, tenantId, 'Empresa Demonstração Ltda', 'Demo', 'ACTIVE');
+}
+
+console.log('Ambiente DEMO pronto.');
+console.log('Escritório: escritorio-demonstracao / admin@demo.local / Admin@123');
+console.log('Estas credenciais existem somente com DEMO_MODE=true.');

@@ -181,7 +181,7 @@ test('21-24 exportação somente POSTED',async()=>{
   await req('POST','/api/aprovacao/'+c.data.id+'/rejeitar',{reason:'Revisar'},ownerA.token);
   const d=await req('POST','/api/lancamentos',{company_id:companyA.id,occurred_on:'2026-09-12',description:'Exp POSTED 1312',lines:[{account_id:accDesp.id,side:'D',amount_cents:1300},{account_id:accBanco.id,side:'C',amount_cents:1300}]},ownerA.token);
   await req('POST','/api/aprovacao/'+d.data.id+'/aprovar',{},ownerA.token);
-  const exp=await req('POST','/api/exportacoes/gerar',{company_id:companyA.id,system_key:'dominio',period_start:'2026-09-12',period_end:'2026-09-12'},ownerA.token);
+  const exp=await req('POST','/api/exportacoes/gerar',{company_id:companyA.id,system_key:'contaazul',period_start:'2026-09-12',period_end:'2026-09-12'},ownerA.token);
   assert.equal(exp.status,201,JSON.stringify(exp.data));
   const ids=db.prepare('SELECT entry_id FROM export_items WHERE export_id=?').all(exp.data.id).map(x=>x.entry_id);
   assert.ok(ids.includes(d.data.id));
@@ -245,7 +245,7 @@ test('28 E2E despesa + documento → classificação → aprovação → POSTED 
   assert.equal(entryRow(exp.data.entry_id).status,'POSTED');
   const listed=items(await req('GET','/api/lancamentos',undefined,ownerA.token,companyA.id));
   assert.ok(listed.some(x=>x.id===exp.data.entry_id));
-  const exportJob=await req('POST','/api/exportacoes/gerar',{company_id:companyA.id,system_key:'dominio',period_start:'2026-09-16',period_end:'2026-09-16'},ownerA.token);
+  const exportJob=await req('POST','/api/exportacoes/gerar',{company_id:companyA.id,system_key:'contaazul',period_start:'2026-09-16',period_end:'2026-09-16'},ownerA.token);
   const ids=db.prepare('SELECT entry_id FROM export_items WHERE export_id=?').all(exportJob.data.id).map(x=>x.entry_id);
   assert.ok(ids.includes(exp.data.entry_id));
   const clsAudit=db.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='CLASSIFICATION_COMPLETED' AND entity_id=?").get(exp.data.entry_id).n;
@@ -272,7 +272,7 @@ test('34-36 documentos, portal cliente e escritório',async()=>{
   const office=await fetch(base+'/');
   assert.equal(office.status,200);
   const html=await office.text();
-  assert.match(html,/app\.js\?v=s13-34/);
+  assert.match(html,/app\.js\?v=s28-1/);
   const js=fs.readFileSync(path.join(__dirname,'../frontend/public/assets/app.js'),'utf8');
   assert.match(js,/Após classificar, a movimentação seguirá para aprovação/);
   assert.match(js,/Após aprovar, o lançamento contábil será efetivado automaticamente/);

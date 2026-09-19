@@ -64,41 +64,42 @@ test('cabeçalho e rodapé sticky do modal de empresa', () => {
 
 test('Nova despesa do escritório segue ordem operacional', () => {
   const js = read('frontend/public/assets/app.js');
+  const se = read('frontend/public/assets/smart-expense.js');
   const slice = js.slice(js.indexOf('function txModal'), js.indexOf('async function entries'));
-  assert.match(slice, /Nova despesa/);
-  assert.match(slice, /Descrição \*/);
-  assert.match(slice, /Valor \*/);
-  assert.match(slice, /Data \*/);
-  assert.match(slice, /Forma de pagamento/);
-  assert.match(slice, /Banco \/ Caixa/);
-  assert.match(slice, /Comprovante/);
-  assert.match(slice, /Salvar despesa/);
-  assert.match(slice, /Salvando\.\.\./);
-  assert.match(slice, /Despesa registrada com sucesso\. Ela foi enviada para análise da contabilidade/);
-  assert.ok(slice.indexOf('Descrição') < slice.indexOf('Valor'));
-  assert.ok(slice.indexOf('Valor') < slice.indexOf('Data'));
+  assert.match(slice, /CdsSmartExpense\.open/);
+  assert.match(slice, /mode:'office'/);
+  assert.match(se, /Nova despesa/);
+  assert.match(se, /Fornecedor/);
+  assert.match(se, /Data da competência/);
+  assert.match(se, /Descrição \*/);
+  assert.match(se, /Valor \*/);
+  assert.match(se, /Categoria/);
+  assert.match(se, /Forma de pagamento/);
+  assert.match(se, /Ler novamente/);
+  assert.match(se, /Salvar despesa/);
+  assert.match(se, /Salvando\.\.\./);
+  assert.match(se, /Despesa registrada com sucesso\. Ela foi enviada para análise da contabilidade/);
+  assert.ok(se.indexOf('Fornecedor') < se.indexOf('Data da competência'));
+  assert.ok(se.indexOf('Data da competência') < se.indexOf('Descrição'));
+  assert.ok(se.indexOf('Descrição') < se.indexOf('Valor'));
 });
 
 test('Portal Nova despesa e ausência de Nova receita', () => {
   const js = read('frontend/public/portal/portal.js');
+  const se = read('frontend/public/assets/smart-expense.js');
   const css = read('frontend/public/portal/portal.css');
   assert.match(js, /Nova despesa/);
-  assert.match(js, /Registre uma despesa da sua empresa/);
-  assert.match(js, /Forma de pagamento/);
-  assert.match(js, /Salvar despesa/);
-  assert.match(js, /Salvando\.\.\./);
-  assert.match(js, /Despesa registrada com sucesso\. Ela foi enviada para análise da contabilidade/);
-  assert.match(js, /id="amountFieldError"/);
+  assert.match(js, /CdsSmartExpense\.open/);
+  assert.match(js, /mode:'client'/);
+  assert.match(se, /Forma de pagamento/);
+  assert.match(se, /Salvar despesa/);
+  assert.match(se, /Salvando\.\.\./);
+  assert.match(se, /Despesa registrada com sucesso\. Ela foi enviada para análise da contabilidade/);
   assert.doesNotMatch(js, /Nova receita/);
   assert.match(css, /max-width:960px/);
-  assert.match(css, /min-height:148px/);
   const form = js.slice(js.indexOf('async function transactionForm'), js.indexOf('async function detail'));
-  assert.ok(form.indexOf('Descrição') < form.indexOf('Valor'));
-  assert.ok(form.indexOf('Valor') < form.indexOf('Data'));
-  assert.ok(form.indexOf('Forma de pagamento') < form.indexOf('Banco'));
-  assert.ok(form.indexOf('Banco') < form.indexOf('Comprovante'));
-  assert.match(form, /modal-back/);
-  assert.match(form, /Informe descrição, valor, data, pagamento e comprovante/);
+  assert.match(form, /CdsSmartExpense\.open/);
+  assert.match(form, /\/api\/client\/despesas/);
   assert.match(js, /Notificações/);
   assert.match(js, /Alterar senha/);
 });
@@ -202,14 +203,16 @@ test('menu global usa Equipe e acessos, empresa mantém Usuários', () => {
   assert.match(js, /api\('\/usuarios\?page='/);
 });
 
-test('HTML aponta assets s13-34 no escritório e s13-13 no Portal', () => {
+test('HTML aponta assets versionados no escritório e no Portal', () => {
   const admin = read('frontend/public/index.html');
   const portal = read('frontend/public/portal/index.html');
-  assert.match(admin, /app\.js\?v=s13-34/);
+  assert.match(admin, /app\.js\?v=s28-1/);
+  assert.match(admin, /smart-expense\.js\?v=s25-1/);
   assert.match(admin, /theme\.css\?v=s13-23/);
   assert.match(admin, /tokens\.css\?v=s13-15/);
   assert.match(admin, /document-viewer\.js\?v=s13-14/);
-  assert.match(portal, /portal\.js\?v=s13-13/);
+  assert.match(portal, /portal\.js\?v=s27-6/);
+  assert.match(portal, /smart-expense\.js\?v=s25-1/);
   assert.match(portal, /portal\.css\?v=s13-12/);
   assert.match(portal, /document-viewer\.js\?v=s13-14/);
 });

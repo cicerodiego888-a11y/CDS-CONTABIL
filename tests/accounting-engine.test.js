@@ -241,7 +241,7 @@ test('decisão manual N linhas, histórico e idempotência',async()=>{
 test('exportação canônica lê N linhas',async()=>{
   const e=await req('POST','/api/lancamentos',{company_id:companyA.id,occurred_on:'2026-09-10',description:'Export N',lines:[{account_id:accDesp.id,side:'D',amount_cents:100000},{account_id:accBanco.id,side:'C',amount_cents:60000},{account_id:accCaixa.id,side:'C',amount_cents:40000}]},ownerA.token);
   await req('POST','/api/aprovacao/'+e.data.id+'/aprovar',{},ownerA.token);
-  const exp=await req('POST','/api/exportacoes/gerar',{company_id:companyA.id,system_key:'dominio',period_start:'2026-09-01',period_end:'2026-09-30'},ownerA.token);
+  const exp=await req('POST','/api/exportacoes/gerar',{company_id:companyA.id,system_key:'contaazul',period_start:'2026-09-01',period_end:'2026-09-30'},ownerA.token);
   assert.equal(exp.status,201,JSON.stringify(exp.data));
   assert.ok(exp.data.count>=1);
 });

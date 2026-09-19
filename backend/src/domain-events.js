@@ -16,7 +16,15 @@ const EVENT_TYPES = Object.freeze({
   COMPANY_CREATED: 'COMPANY_CREATED',
   IMPORT_CREATED: 'IMPORT_CREATED',
   IMPORT_COMPLETED: 'IMPORT_COMPLETED',
-  IMPORT_FAILED: 'IMPORT_FAILED'
+  IMPORT_FAILED: 'IMPORT_FAILED',
+  PROCESS_OCCURRENCE_AUTO_CREATED: 'PROCESS_OCCURRENCE_AUTO_CREATED',
+  PROCESS_OCCURRENCE_MANUALLY_CREATED: 'PROCESS_OCCURRENCE_MANUALLY_CREATED',
+  PROCESS_OCCURRENCE_STARTED: 'PROCESS_OCCURRENCE_STARTED',
+  PROCESS_STEP_STARTED: 'PROCESS_STEP_STARTED',
+  PROCESS_STEP_COMPLETED: 'PROCESS_STEP_COMPLETED',
+  PROCESS_OCCURRENCE_COMPLETED: 'PROCESS_OCCURRENCE_COMPLETED',
+  PROCESS_STEP_OVERDUE: 'PROCESS_STEP_OVERDUE',
+  CLIENT_PASSWORD_RESET_REQUESTED: 'CLIENT_PASSWORD_RESET_REQUESTED'
 });
 
 const UNIQUE_ONCE = new Set([
@@ -29,7 +37,10 @@ const UNIQUE_ONCE = new Set([
   EVENT_TYPES.COMPANY_CREATED,
   EVENT_TYPES.IMPORT_CREATED,
   EVENT_TYPES.IMPORT_COMPLETED,
-  EVENT_TYPES.IMPORT_FAILED
+  EVENT_TYPES.IMPORT_FAILED,
+  EVENT_TYPES.PROCESS_OCCURRENCE_AUTO_CREATED,
+  EVENT_TYPES.PROCESS_OCCURRENCE_MANUALLY_CREATED,
+  EVENT_TYPES.PROCESS_STEP_OVERDUE
 ]);
 
 const OFFICE_EVENTS = new Set([
@@ -45,7 +56,8 @@ const OFFICE_EVENTS = new Set([
   EVENT_TYPES.COMPANY_CREATED,
   EVENT_TYPES.IMPORT_CREATED,
   EVENT_TYPES.IMPORT_COMPLETED,
-  EVENT_TYPES.IMPORT_FAILED
+  EVENT_TYPES.IMPORT_FAILED,
+  EVENT_TYPES.CLIENT_PASSWORD_RESET_REQUESTED
 ]);
 
 const CLIENT_CONFIRM_EVENTS = new Set([
@@ -57,7 +69,12 @@ const COMPANY_CLIENT_EVENTS = new Set([
   EVENT_TYPES.REQUEST_CREATED
 ]);
 
-const PAYLOAD_KEYS = new Set(['amount_cents','description','payment_method','receipt_method','method','original_name','status','note','title','imported_rows','total_rows']);
+const PAYLOAD_KEYS = new Set([
+  'amount_cents','description','payment_method','receipt_method','method','original_name',
+  'status','note','title','imported_rows','total_rows','process_id','occurrence_id','step_id',
+  'responsible_user_id','next_responsible_user_id','step_name','process_name','source',
+  'user_name','user_email','target_user_id','reference_type'
+]);
 
 function moneyLabel(cents){
   const n=Number(cents||0)/100;
@@ -102,6 +119,14 @@ function copyFor(eventType, companyName, payload, audience){
     case 'IMPORT_CREATED':return{title:'Importação iniciada',message:`Importação registrada para ${name}`,context:payload.description||''};
     case 'IMPORT_COMPLETED':return{title:'Importação concluída',message:`Importação de ${name} foi concluída`,context:payload.description||''};
     case 'IMPORT_FAILED':return{title:'Importação com erro',message:`A importação de ${name} falhou`,context:payload.note||payload.description||''};
+    case 'CLIENT_PASSWORD_RESET_REQUESTED':{
+      const who=payload.user_name||name;
+      return{
+        title:'Solicitação de redefinição de acesso',
+        message:`${who} solicitou a redefinição de acesso ao Portal do Cliente.`,
+        context:[name,payload.user_email].filter(Boolean).join(' · ')
+      };
+    }
     default:return{title:'Atualização',message:name,context:''};
   }
 }
@@ -113,7 +138,10 @@ function createEventBus({db,id,one,qRows,exec}){
     return Number(row.in_app_enabled)===1;
   }
 
-  function officeRecipients(tenantId,actorUserId){
+  function officeRecipients(tenantId,actorUserId,eventType){
+    if(eventType===EVENT_TYPES.CLIENT_PASSWORD_RESET_REQUESTED){
+      return qRows("SELECT id FROM users WHERE tenant_id=? AND role IN('OWNER','ACCOUNTANT') AND active=1",tenantId).map(u=>u.id);
+    }
     return qRows("SELECT id FROM users WHERE tenant_id=? AND role IN('OWNER','ACCOUNTANT','STAFF') AND active=1",tenantId).map(u=>u.id);
   }
 
@@ -135,7 +163,7 @@ function createEventBus({db,id,one,qRows,exec}){
       recipients.set(uid,audience);
     };
     if(OFFICE_EVENTS.has(event.event_type)){
-      for(const uid of officeRecipients(event.tenant_id,event.actor_user_id))add(uid,'office');
+      for(const uid of officeRecipients(event.tenant_id,event.actor_user_id,event.event_type))add(uid,'office');
     }
     if(CLIENT_CONFIRM_EVENTS.has(event.event_type)&&event.actor_user_id){
       const actor=one('SELECT id,role,active FROM users WHERE id=? AND tenant_id=?',event.actor_user_id,event.tenant_id);

@@ -1,3 +1,6 @@
+const {loadConfig}=require('../backend/src/config');
+const config=loadConfig(process.env);
+if(!config.DEMO_MODE){console.log('Seed CLIENT de demonstração ignorado (DEMO_MODE=false).');process.exit(0)}
 const {db}=require('../backend/src/server');
 const bcrypt=require('bcryptjs');
 const crypto=require('crypto');

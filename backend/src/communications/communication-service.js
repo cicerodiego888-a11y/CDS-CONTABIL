@@ -40,19 +40,31 @@ function createCommunicationService(deps){
     return {accepted:false,provider:r&&r.provider||provider.name,status:'failed',code:r&&r.code||'EMAIL_SEND_FAILED',message:r&&r.message,retryable:r&&r.retryable===true};
   }
 
-  async function deliverInvite({tenantId,companyId,userId,to,name,company,url,resend,actorUserId}){
+  async function deliverInvite({tenantId,companyId,userId,to,name,company,url,resend,actorUserId,purpose}){
     const provider=resolveEmailProvider(tenantId);
     const brand=branding(tenantId);
-    const eventType=resend?COMMUNICATION_EVENTS.USER_INVITE_RESEND:COMMUNICATION_EVENTS.USER_INVITE;
-    const tpl=templates.render('user-invite',{name,company,url,branding:brand});
+    const isReset=String(purpose||'')==='PASSWORD_RESET';
+    const templateKey=isReset?'password-reset':'user-invite';
+    const eventType=isReset?'PASSWORD_RESET':(resend?COMMUNICATION_EVENTS.USER_INVITE_RESEND:COMMUNICATION_EVENTS.USER_INVITE);
+    const inviteUrl=String(url||'').trim();
+    const tpl=templates.render(templateKey,{name,company,url:inviteUrl,branding:brand,cta:isReset?'Criar nova senha':undefined});
+    // url no payload é obrigatório para CTA e para retries do worker (sem recriar href vazio).
     const jobId=queue.insertEmailJob({
       tenant_id:tenantId,company_id:companyId,recipient_user_id:userId,destination:to,
-      template_key:'user-invite',event_type:eventType,provider:provider&&provider.name||null,
-      actor_user_id:actorUserId,payload:{to,subject:tpl.subject,has_cta:true,office_name:brand.office_name,name,company,url}
+      template_key:templateKey,event_type:eventType,provider:provider&&provider.name||null,
+      actor_user_id:actorUserId,payload:{
+        to,subject:tpl.subject,has_cta:true,office_name:brand.office_name,name,company,
+        purpose:isReset?'PASSWORD_RESET':'ACTIVATION',url:inviteUrl
+      }
     });
     let delivery;
     try{
-      delivery=await dispatch(provider,{to,subject:tpl.subject,text:tpl.text,html:tpl.html,metadata:{event_type:eventType}},{to,name,company,url,resend:!!resend});
+      // PASSWORD_RESET usa o HTML/assunto já renderizados; sendInvitation do provider é só para ativação.
+      delivery=await dispatch(
+        provider,
+        {to,subject:tpl.subject,text:tpl.text,html:tpl.html,metadata:{event_type:eventType}},
+        isReset?null:{to,name,company,url:inviteUrl,resend:!!resend}
+      );
     }catch(err){
       delivery={accepted:false,status:'failed',code:'EMAIL_SEND_FAILED',message:resend?MSG_RESEND_FAILED:MSG_FAILED};
     }
@@ -98,7 +110,7 @@ function createCommunicationService(deps){
     let payload={};try{payload=JSON.parse(job.payload_json||'{}')}catch{payload={}}
     const to=payload.to||job.destination;
     const brand=branding(job.tenant_id);
-    const tpl=templates.render(job.template_key,Object.assign({},payload,{branding:brand,to}));
+    const tpl=templates.render(job.template_key,Object.assign({},payload,{branding:brand,to,url:payload.url||''}));
     let result;
     try{
       result=await dispatch(provider,{to,cc:payload.cc,bcc:payload.bcc,subject:tpl.subject||payload.subject,text:tpl.text,html:tpl.html,replyTo:payload.replyTo,metadata:{event_type:job.event_type}});

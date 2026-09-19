@@ -183,5 +183,5 @@ test('18 Portal permanece sem alteração',()=>{
   assert.doesNotMatch(portal,/configuracoes\/comunicacoes\/email/);
   assert.doesNotMatch(portal,/E-mail do sistema/);
   const html=fs.readFileSync(path.join(__dirname,'../frontend/public/portal/index.html'),'utf8');
-  assert.match(html,/portal\.js\?v=s13-13/);
+  assert.match(html,/portal\.js\?v=s27-6/);
 });

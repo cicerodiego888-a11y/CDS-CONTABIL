@@ -143,7 +143,7 @@ test('10 Item NEEDS_CLASSIFICATION aparece diretamente em Classificação',async
 test('11 Não existe página intermediária Pendente Classificação',()=>{
   assert.doesNotMatch(js,/Pendente Classificação/);
   assert.ok(!ctxItems.some(x=>String(x[1]).includes('Pendente')));
-  assert.match(html,/app\.js\?v=s13-34/);
+  assert.match(html,/app\.js\?v=s28-1/);
 });
 
 test('12 Clique Classificar leva diretamente para a classificação',()=>{

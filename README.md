@@ -1,5 +1,14 @@
 # CDS Contábil Connect — V1.0 Implementado
 
+Certificação e congelamento do núcleo: `docs/V1.0-CERTIFICATION.md`.
+
+Motor de Processos (Sprint 16): `docs/SPRINT-16-MOTOR-PROCESSOS.md`.
+Execução e checklist (Sprint 17): `docs/SPRINT-17-EXECUCAO-CHECKLIST.md`.
+Recorrência mensal (Sprint 18): `docs/SPRINT-18-RECORRENCIA.md`.
+Eventos e notificações do Motor (Sprint 19): `docs/SPRINT-19-EVENTOS-NOTIFICACOES.md`.
+Inteligência Documental (Sprint 20): `docs/SPRINT-20-INTELIGENCIA-DOCUMENTAL.md`.
+IA e Classificação Contábil (Sprint 21): `docs/SPRINT-21-IA-CLASSIFICACAO.md`.
+
 SaaS multi-tenant para escritórios contábeis. O sistema recebe dados financeiros simples das empresas, normaliza os eventos, aplica regras contábeis configuradas pelo escritório, cria partidas de múltiplas linhas, envia para revisão/aprovação e gera exportações a partir apenas de lançamentos aprovados.
 
 ## O que está implementado
@@ -37,19 +46,25 @@ Requer Node.js 20+.
 
 ```bash
 npm install
+copy .env.example .env
 npm run setup
-npm run seed
 npm start
 ```
 
 Acesse `http://localhost:3333`.
 
-Usuário inicial do ambiente de demonstração:
+Em produção: `NODE_ENV=production`, `DEMO_MODE=false`, `JWT_SECRET` forte e `DOCUMENT_ENCRYPTION_KEY` definida. O sistema não inicia sem essas chaves.
 
-- E-mail: `admin@demo.local`
-- Senha: `Admin@123`
+Para ambiente de demonstração local:
 
-Troque a senha e `JWT_SECRET` antes de qualquer uso real.
+```bash
+set DEMO_MODE=true
+npm run seed
+```
+
+As credenciais de demo só são criadas e exibidas na tela de login quando `DEMO_MODE=true`. Não use demo em produção.
+
+Documentos ficam em `UPLOAD_DIR` com caminho relativo no banco (`documents/{id}/arquivo`). Backup: `npm run backup`. Restore: veja `docs/BACKUP-RESTORE.md`.
 
 ## Fluxo principal
 

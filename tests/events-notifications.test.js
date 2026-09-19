@@ -172,8 +172,10 @@ test('usuário inativo não recebe; unread e marcar lida; paginação; since',as
 });
 
 test('contexto company, spoof e transação com rollback',async()=>{
+  // Inbox do escritório é pessoal: X-Company-Id não esconde notificações de outras empresas.
   const scoped=await req('GET','/api/notificacoes?page=1&page_size=50',undefined,staffA.token,companyA.id);
-  assert.ok(items(scoped).every(x=>!x.company_id||x.company_id===companyA.id));
+  assert.equal(scoped.status,200);
+  assert.ok(Array.isArray(items(scoped)));
   const spoof=await req('GET','/api/notificacoes?page=1&page_size=50',undefined,ownerA.token,companyB.id);
   assert.equal(spoof.status,404);
   const beforeExp=db.prepare('SELECT COUNT(*) n FROM expenses WHERE tenant_id=?').get(ownerA.user.tenant_id).n;
@@ -227,10 +229,12 @@ test('HTTP: login, portal isolado e HTML do escritório com notificações',asyn
   const dash=await req('GET','/api/dashboard',undefined,login.data.token);
   assert.equal(dash.status,200);
   const html=await fetch(base+'/').then(r=>r.text());
-  assert.match(html,/app\.js\?v=s13-34/);
+  assert.match(html,/app\.js\?v=s28-1/);
   const js=await fetch(base+'/assets/app.js?v=s13-15').then(r=>r.text());
   assert.match(js,/notif-bell/);
-  assert.match(js,/45000/);
+  assert.match(js,/NOTIF_POLL_VISIBLE_MS\s*=\s*5000/);
+  assert.match(js,/startNotifPoll/);
+  assert.match(js,/dedupeNotifications/);
   const portal=await fetch(base+'/portal/').then(r=>r.text());
   assert.doesNotMatch(portal,/Débito/);
 });

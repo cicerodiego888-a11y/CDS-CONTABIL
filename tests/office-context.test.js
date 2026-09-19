@@ -163,7 +163,7 @@ test('nova despesa e documento no contexto sem seleção alternativa',async()=>{
 test('exportação no contexto usa a empresa ativa',async()=>{
   const missing=await req('POST','/api/exportacoes/gerar',{system_key:'dominio',period_start:'2026-09-01',period_end:'2026-09-30'},ownerA.token);
   assert.equal(missing.status,400);
-  const ok=await req('POST','/api/exportacoes/gerar',{company_id:empresaA2.id,system_key:'dominio',period_start:'2026-09-01',period_end:'2026-09-30'},ownerA.token,cremolia.id);
+  const ok=await req('POST','/api/exportacoes/gerar',{company_id:empresaA2.id,system_key:'contaazul',period_start:'2026-09-01',period_end:'2026-09-30'},ownerA.token,cremolia.id);
   assert.equal(ok.status,201,JSON.stringify(ok.data));
   const row=db.prepare('SELECT company_id FROM exports WHERE id=?').get(ok.data.id);
   assert.equal(row.company_id,cremolia.id);
@@ -173,7 +173,7 @@ test('refresh restaura contexto pela URL e listagem permanece paginada',async()=
   const page=await fetch(base+'/empresas/'+cremolia.id);
   assert.equal(page.status,200);
   const html=await page.text();
-  assert.match(html,/app\.js\?v=s13-34/);
+  assert.match(html,/app\.js\?v=s28/);
   const list=await req('GET','/api/empresas?page=1&page_size=50',undefined,ownerA.token,cremolia.id);
   assert.equal(list.status,200);
   assert.ok(list.data.total>=3);

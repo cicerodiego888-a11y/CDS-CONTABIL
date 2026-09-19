@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { resolveSafePath: storageResolve } = require('./storage');
 
 const PDF = 'application/pdf';
 const JPEG = 'image/jpeg';
@@ -46,8 +47,8 @@ function sniffFile(filePath) {
   }
 }
 
-function resolveContentType(document, safePath) {
-  const sniffed = sniffFile(safePath);
+function resolveContentType(document, safePath, plainBuf) {
+  const sniffed = plainBuf ? detectContentType(plainBuf) : sniffFile(safePath);
   if (sniffed) return sniffed;
   return normalizeStoredMime(document.mime_type) || mimeFromName(document.original_name) || 'application/octet-stream';
 }
@@ -60,12 +61,7 @@ function isLogicalDocumentId(id) {
 }
 
 function resolveSafePath(storagePath, uploadsRoot) {
-  if (!storagePath) return null;
-  const root = path.resolve(uploadsRoot);
-  const resolved = path.resolve(String(storagePath));
-  const prefix = root.endsWith(path.sep) ? root : root + path.sep;
-  if (resolved !== root && !resolved.startsWith(prefix)) return null;
-  return resolved;
+  return storageResolve(storagePath, uploadsRoot);
 }
 
 function safeFileName(name) {
@@ -73,7 +69,7 @@ function safeFileName(name) {
   return base || 'documento';
 }
 
-function createDocumentAccess({ one, uploadsRoot }) {
+function createDocumentAccess({ one, uploadsRoot, storage }) {
   const root = path.resolve(uploadsRoot);
 
   function load(tenantId, documentId, opts) {
@@ -88,23 +84,39 @@ function createDocumentAccess({ one, uploadsRoot }) {
     return { document };
   }
 
+  function authorize(req, document, companyOkFn) {
+    if (!document) return { error: 'DOCUMENT_ACCESS_DENIED', status: 403, message: 'Acesso ao documento não permitido.' };
+    if (req.user.role === 'CLIENT') {
+      if (document.company_id !== (req.companyScope || req.clientCompany && req.clientCompany.id)) {
+        return { error: 'NOT_FOUND', status: 404, message: 'Documento não encontrado.' };
+      }
+      return { ok: true };
+    }
+    if (typeof companyOkFn === 'function' && !companyOkFn(req, document.company_id)) {
+      return { error: 'NOT_FOUND', status: 404, message: 'Documento não encontrado.' };
+    }
+    return { ok: true };
+  }
+
   function send(res, document, disposition) {
     const safe = resolveSafePath(document.storage_path, root);
     if (!safe || !fs.existsSync(safe) || !fs.statSync(safe).isFile()) {
       return { error: 'NOT_FOUND', status: 404, message: 'Documento não encontrado.' };
     }
-    const mime = resolveContentType(document, safe);
+    const plain = storage ? storage.readPlain(document.storage_path) : fs.readFileSync(safe);
+    if (!plain) return { error: 'NOT_FOUND', status: 404, message: 'Documento não encontrado.' };
+    const mime = resolveContentType(document, safe, plain);
     const mode = disposition === 'inline' ? 'inline' : 'attachment';
     res.setHeader('Content-Type', mime);
     res.setHeader('Content-Disposition', `${mode}; filename="${safeFileName(document.original_name)}"`);
     res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    fs.createReadStream(safe).pipe(res);
+    res.end(plain);
     return { ok: true };
   }
 
-  return { load, send, resolveContentType, isLogicalDocumentId, resolveSafePath };
+  return { load, send, authorize, resolveContentType, isLogicalDocumentId, resolveSafePath };
 }
 
 module.exports = {

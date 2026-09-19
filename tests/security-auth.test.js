@@ -9,6 +9,7 @@ const {test,before,after}=require('node:test');
 const assert=require('node:assert/strict');
 process.env.CDS_DB_PATH=path.join(os.tmpdir(),`cds-s05-${process.pid}-${Date.now()}.db`);
 process.env.JWT_SECRET='test-sprint-05-secret-ok';
+process.env.DEMO_MODE='false';
 try{fs.unlinkSync(process.env.CDS_DB_PATH)}catch{}
 const {app,db}=require('../backend/src/server');
 
@@ -58,7 +59,16 @@ after(()=>{
 });
 
 test('JWT_SECRET ausente em production impede o boot',()=>{
-  const r=cp.spawnSync(process.execPath,['-e',"process.env.NODE_ENV='production';process.env.JWT_SECRET='';process.env.CDS_DB_PATH=require('os').tmpdir()+'/cds-jwt-prod.db';try{require('./backend/src/server');process.exit(0)}catch(e){process.stderr.write(e.message);process.exit(2)}"],{cwd:root,env:{...process.env,NODE_ENV:'production',JWT_SECRET:'',CDS_DB_PATH:path.join(os.tmpdir(),'cds-jwt-prod.db')},encoding:'utf8'});
+  // Isola do .env local: produção + DEMO_MODE=true é rejeitado antes do JWT.
+  // Este teste valida JWT_SECRET, então força DEMO_MODE=false explicitamente.
+  const childEnv={
+    ...process.env,
+    NODE_ENV:'production',
+    DEMO_MODE:'false',
+    JWT_SECRET:'',
+    CDS_DB_PATH:path.join(os.tmpdir(),'cds-jwt-prod.db')
+  };
+  const r=cp.spawnSync(process.execPath,['-e',"process.env.NODE_ENV='production';process.env.DEMO_MODE='false';process.env.JWT_SECRET='';process.env.CDS_DB_PATH=require('os').tmpdir()+'/cds-jwt-prod.db';try{require('./backend/src/server');process.exit(0)}catch(e){process.stderr.write(e.message);process.exit(2)}"],{cwd:root,env:childEnv,encoding:'utf8'});
   assert.notEqual(r.status,0);
   assert.match(String(r.stderr||'')+String(r.stdout||''),/JWT_SECRET/);
 });

@@ -106,6 +106,24 @@ test('9 reenvio revoga convite anterior',async()=>{
   assert.equal(sent.length,1);
 });
 
+test('9b salvar usuário pendente envia convite automaticamente',async()=>{
+  const sent=[];
+  setEmailProvider(createEmailProvider({send:async mail=>sent.push(mail)}));
+  const createdUser=await req('POST',`/api/empresas/${company.id}/users`,{
+    name:'Auto Save',email:'autosave.s133d@test.local',profile:'CLIENT_VIEWER'
+  },owner.token);
+  assert.equal(createdUser.status,201,JSON.stringify(createdUser.data));
+  sent.length=0;
+  const patched=await req('PATCH','/api/client-users/'+createdUser.data.user.id,{
+    name:'Auto Save',email:'autosave.novo.s133d@test.local',profile:'CLIENT_VIEWER'
+  },owner.token);
+  assert.equal(patched.status,200,JSON.stringify(patched.data));
+  assert.ok(patched.data.invitation);
+  assert.equal(patched.data.invitation.email_sent,true);
+  assert.equal(sent.length,1);
+  assert.equal(sent[0].to,'autosave.novo.s133d@test.local');
+});
+
 test('10 token nunca aparece em resposta de produção',async()=>{
   const prev=process.env.NODE_ENV;
   process.env.NODE_ENV='production';

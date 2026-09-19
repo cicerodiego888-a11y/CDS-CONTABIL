@@ -22,11 +22,38 @@ function userInvite(vars){
 }
 
 function passwordReset(vars){
-  const who=String(vars.name||'olá');
-  const link=String(vars.url||'');
-  const text=['Olá, '+who+'.','','Redefina sua senha no CDS Contábil:','',link,''].join('\n');
-  const html=wrapHtml(`<h1 style="margin:0 0 16px;font-size:22px">Redefinir senha</h1><p>Olá, ${escapeHtml(who)}.</p><p><a href="${escapeHtml(link)}">Criar nova senha</a></p>`,vars.branding);
-  return {subject:'Redefinição de senha — CDS Contábil',text,html};
+  const who=String(vars.name||'olá').trim()||'olá';
+  const link=String(vars.url||'').trim();
+  const text=[
+    'Olá, '+who+'.',
+    '',
+    'O escritório contábil solicitou a redefinição do seu acesso',
+    'ao CDS Contábil Connect.',
+    '',
+    'Clique no link abaixo para criar uma nova senha.',
+    '',
+    link,
+    '',
+    'Este link é individual, possui validade limitada e pode ser',
+    'utilizado uma única vez.',
+    '',
+    'Se você não esperava este e-mail, entre em contato com seu',
+    'escritório contábil.',
+    '',
+    'CDS Contábil Connect'
+  ].join('\n');
+  const html=wrapHtml(
+    `<h1 style="margin:0 0 16px;font-size:22px">Redefinição de acesso</h1>
+    <p style="margin:0 0 12px;line-height:1.5">Olá, ${escapeHtml(who)}.</p>
+    <p style="margin:0 0 20px;line-height:1.5">O escritório contábil solicitou a redefinição do seu acesso ao CDS Contábil Connect.</p>
+    <p style="margin:0 0 16px"><a href="${escapeHtml(link)}" style="display:inline-block;background:#0f5f59;color:#fff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:650" target="_blank" rel="noopener noreferrer">Criar nova senha</a></p>
+    <p style="margin:0 0 20px;font-size:13px;line-height:1.5;word-break:break-all">Se o botão não abrir, use este link:<br><a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link)}</a></p>
+    <p style="margin:0 0 12px;font-size:13px;color:#5b6d73;line-height:1.5">Este link é individual, possui validade limitada e pode ser utilizado uma única vez.</p>
+    <p style="margin:0;font-size:13px;color:#5b6d73;line-height:1.5">Se você não esperava este e-mail, entre em contato com seu escritório contábil.</p>
+    <p style="margin:16px 0 0;font-size:13px;color:#5b6d73">CDS Contábil Connect</p>`,
+    vars.branding
+  );
+  return {subject:'Redefinição de acesso — CDS Contábil Connect',text,html};
 }
 
 function documentReceived(vars){

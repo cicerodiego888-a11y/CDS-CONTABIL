@@ -321,11 +321,10 @@ test('30 categoria + banco configurados retornam status completo',async()=>{
   assert.ok(dx.data.messages.includes('Conta contábil da categoria identificada.'));
   assert.ok(dx.data.messages.includes('Conta contábil do banco identificada.'));
   assert.ok(dx.data.messages.includes('Categoria e banco possuem contas contábeis configuradas.'));
-  assert.match(formSrc,/<label>Descrição/);
-  assert.doesNotMatch(formSrc,/<label>Categoria<\/label>/);
-  assert.doesNotMatch(formSrc,/category_id/);
+  assert.match(formSrc,/CdsSmartExpense\.open/);
+  assert.match(formSrc,/category_id|categories/);
   assert.match(js,/CONFIGURAÇÕES CONTÁBEIS/);
   assert.match(js,/Pesquisar conta analítica/);
-  assert.match(html,/app\.js\?v=s13-34/);
-  assert.match(portalHtml,/portal\.js\?v=s13-13/);
+  assert.match(html,/app\.js\?v=s28-1/);
+  assert.match(portalHtml,/portal\.js\?v=s27-6/);
 });

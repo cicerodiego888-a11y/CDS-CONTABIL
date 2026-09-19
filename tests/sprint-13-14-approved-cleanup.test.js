@@ -104,7 +104,7 @@ test('7-8 ENTRY_APPROVED e ENTRY_POSTED continuam registrados',async()=>{
 test('9 exportação continua aceitando POSTED',async()=>{
   const d=await req('POST','/api/lancamentos',{company_id:companyA.id,occurred_on:'2026-09-11',description:'Exp 1314',lines:[{account_id:accDesp.id,side:'D',amount_cents:1300},{account_id:accBanco.id,side:'C',amount_cents:1300}]},ownerA.token);
   await req('POST','/api/aprovacao/'+d.data.id+'/aprovar',{},ownerA.token);
-  const exp=await req('POST','/api/exportacoes/gerar',{company_id:companyA.id,system_key:'dominio',period_start:'2026-09-11',period_end:'2026-09-11'},ownerA.token);
+  const exp=await req('POST','/api/exportacoes/gerar',{company_id:companyA.id,system_key:'contaazul',period_start:'2026-09-11',period_end:'2026-09-11'},ownerA.token);
   assert.equal(exp.status,201,JSON.stringify(exp.data));
   const ids=db.prepare('SELECT entry_id FROM export_items WHERE export_id=?').all(exp.data.id).map(x=>x.entry_id);
   assert.ok(ids.includes(d.data.id));

@@ -7,6 +7,8 @@ uploads/*
 exports/*
 backups/*
 logs/*
+*.zip
+backend.zip
 !uploads/.gitkeep
 !exports/.gitkeep
 !backups/.gitkeep

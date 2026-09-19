@@ -118,7 +118,7 @@ test('não duplicação: chips 100% iguais à sidebar contextual', () => {
   );
   assert.deepEqual(
     contextMenuGroups.find((g) => g.title === 'CONTÁBIL').items.map((x) => x[1]),
-    ['Classificação', 'Aprovação', 'Lançamentos']
+    ['Classificação', 'Aprovação', 'Lançamentos', 'Integrações']
   );
   assert.deepEqual(
     contextMenuGroups.find((g) => g.title === 'IMPORTAÇÃO').items.map((x) => x[1]),
