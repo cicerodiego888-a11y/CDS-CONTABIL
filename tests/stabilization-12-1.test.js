@@ -273,7 +273,7 @@ test('Dashboard carrega identidade do backend e trata erro parcial',async()=>{
   assert.match(js,/officeIdentityHtml/);
   assert.match(js,/retryActivity/);
   assert.match(js,/Não foi possível carregar agora/);
-  assert.match(js,/Identidade do escritório/);
+  assert.match(js,/Identidade do [Ee]scritório/);
   assert.doesNotMatch(js,/ccc_tenant_logo_/);
   assert.doesNotMatch(js,/localStorage\.setItem\(tenantLogoKey/);
   const dash=await req('GET','/api/dashboard',undefined,ownerA.token);

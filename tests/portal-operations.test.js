@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 const path=require('path');
 const os=require('os');
 const fs=require('fs');
@@ -268,7 +268,7 @@ test('HTTP serve a implementação nova de Nova despesa',async()=>{
   assert.match(portalHtml,/portal\.js\?v=/);
   assert.match(portalHtml,/smart-expense\.js\?v=/);
   assert.doesNotMatch(portalHtml,/Salvar e classificar|Categoria amigável/);
-  const portalJs=await fetch(base+'/portal/portal.js?v=s27-6').then(r=>r.text());
+  const portalJs=await fetch(base+'/portal/portal.js?v=s28-1-6').then(r=>r.text());
   const smartJs=await fetch(base+'/assets/smart-expense.js?v=s23-1').then(r=>r.text());
   assert.match(portalJs,/CdsSmartExpense\.open/);
   assert.match(smartJs,/Salvar despesa/);
@@ -280,7 +280,7 @@ test('HTTP serve a implementação nova de Nova despesa',async()=>{
   const adminHtml=await adminPage.text();
   assert.match(adminHtml,/app\.js\?v=/);
   assert.match(adminHtml,/smart-expense\.js\?v=/);
-  const adminJs=await fetch(base+'/assets/app.js?v=s28-1').then(r=>r.text());
+  const adminJs=await fetch(base+'/assets/app.js?v=s28-1-6').then(r=>r.text());
   assert.match(adminJs,/CdsSmartExpense\.open/);
   assert.match(smartJs,/Salvar despesa/);
   assert.match(portalJs,/function statusTone/);

@@ -1,0 +1,29 @@
+/* Sprint 28.1 — chat de solicitações + alerta */
+.req-chat{display:flex;flex-direction:column;gap:12px;min-height:60vh}
+.req-chat-head{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
+.req-chat-head h1{margin:0;font-size:22px}
+.req-chat-head p{margin:4px 0 0;color:var(--muted,#5e6d66)}
+.req-chat-thread{flex:1;background:var(--panel,#fff);border:1px solid var(--line,#d8e0dc);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;max-height:55vh;overflow:auto}
+.req-bubble{max-width:78%;padding:10px 12px;border-radius:12px;border:1px solid var(--line,#d8e0dc)}
+.req-bubble.office{align-self:flex-start;background:#f3f7f5}
+.req-bubble.client{align-self:flex-end;background:#e8f1ff;border-color:#c9daf5}
+.req-bubble-meta{font-size:11px;font-weight:700;letter-spacing:.04em;color:#5e6d66;margin-bottom:4px}
+.req-bubble-text{white-space:pre-wrap;line-height:1.45}
+.req-bubble-time{font-size:11px;color:#7a8781;margin-top:6px}
+.req-composer{display:flex;gap:10px;align-items:flex-end;background:var(--panel,#fff);border:1px solid var(--line,#d8e0dc);border-radius:12px;padding:12px}
+.req-composer textarea{flex:1;min-height:64px;resize:vertical;border:1px solid var(--line,#d8e0dc);border-radius:8px;padding:10px;font:inherit}
+.req-row-unread{animation:reqBlink 1.2s ease-in-out 3}
+.req-unread-dot{font-size:10px}
+@keyframes reqBlink{0%,100%{background:transparent}50%{background:#fff6d6}}
+.req-msg-alert{position:fixed;right:20px;bottom:20px;z-index:80;max-width:420px;animation:reqAlertIn .25s ease}
+.req-msg-alert.fade{opacity:0;transition:opacity .4s}
+.req-msg-alert-inner{display:flex;flex-direction:column;gap:12px;background:#fff;border:1px solid #d8e0dc;box-shadow:0 16px 40px #16352a28;border-radius:16px;padding:16px}
+.req-msg-alert-brand{display:flex;gap:10px;align-items:center}
+.req-msg-alert-brand img{border-radius:10px;background:var(--color-sidebar)}
+.req-msg-alert-brand strong{display:block;font-size:14px}
+.req-msg-alert-brand small{color:#5e6d66;font-size:12px}
+.req-msg-alert-co{font-weight:700;margin-bottom:2px}
+.req-msg-alert-preview{margin-top:8px;font-style:italic}
+.req-msg-alert-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+@keyframes reqAlertIn{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}
+@media (max-width:720px){.req-bubble{max-width:92%}.req-msg-alert{left:12px;right:12px}}

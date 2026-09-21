@@ -1,9 +1,10 @@
-const state={token:localStorage.getItem('ccc_token'),user:null,page:'dashboard',companies:[],accounts:[],plans:[],categories:[],banks:[],rules:[],selectedCompany:null,branding:null,brandingLogoSrc:null,commsTab:'email',emailEditing:false};
+const state={token:(()=>{try{return localStorage.getItem('ccc_office_token')||localStorage.getItem('ccc_token')}catch{return null}})(),user:null,page:'dashboard',companies:[],accounts:[],plans:[],categories:[],banks:[],rules:[],selectedCompany:null,branding:null,brandingLogoSrc:null,commsTab:'email',emailEditing:false,settingsSection:'geral',dashPreset:'month',dashActivity:'7d',dashFrom:'',dashTo:'',docFilters:{q:'',company_id:'',source:'',status:'',extraction:'',period:'',from:'',to:''}};
+function setOfficeToken(token){state.token=token;try{if(token){localStorage.setItem('ccc_office_token',token);localStorage.removeItem('ccc_token')}else localStorage.removeItem('ccc_office_token')}catch{}}
+function clearSession(msg){if(window.__cdsOfficeEs){try{window.__cdsOfficeEs.close()}catch{}window.__cdsOfficeEs=null}if(state.brandingLogoSrc){try{URL.revokeObjectURL(state.brandingLogoSrc)}catch{}}state.branding=null;state.brandingLogoSrc=null;try{localStorage.removeItem('ccc_office_token');localStorage.removeItem('ccc_token')}catch{}/* Sprint 28.3: não remove ccc_client_token */state.token=null;state.user=null;state.selectedCompany=null;toast(msg||'Sua sessão expirou. Entre novamente para continuar.','warning');login()}
 const $=s=>document.querySelector(s);const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));const money=c=>(Number(c||0)/100).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 function ApiError(message,status,code){this.name='ApiError';this.message=message;this.status=status||0;this.code=code||null}ApiError.prototype=Object.create(Error.prototype);
 function humanApiError(status,payload,network){if(network)return 'Não foi possível conectar ao servidor.';if(status===401)return payload.message||'Sua sessão expirou. Entre novamente para continuar.';if(status===403)return payload.message||'Você não tem permissão para acessar este recurso.';if(status===404)return payload.message||'Registro não encontrado.';if(status===409)return payload.message||'Não foi possível concluir a operação.';if(status===422)return payload.message||'Os dados informados são inválidos.';if(status===429)return payload.message||'Muitas tentativas. Tente novamente em instantes.';if(status>=500)return payload.message||'Não foi possível concluir a operação.';return payload.message||payload.error||'Não foi possível concluir a operação.'}
-function clearSession(msg){if(state.brandingLogoSrc){try{URL.revokeObjectURL(state.brandingLogoSrc)}catch{}}state.branding=null;state.brandingLogoSrc=null;localStorage.removeItem('ccc_token');state.token=null;state.user=null;state.selectedCompany=null;toast(msg||'Sua sessão expirou. Entre novamente para continuar.','warning');login()}
-function isTenantScopedPath(path){return /^\/(configuracoes|comunicacoes|tenant|auditoria|auth|notificacoes)(\/|$)/.test(path)}
+function isTenantScopedPath(path){return /^\/(configuracoes|comunicacoes|tenant|auditoria|auth|notificacoes|push)(\/|$)/.test(path)}
 const api=async(path,opt={})=>{const h={'Content-Type':'application/json',...(opt.headers||{})};if(state.token)h.Authorization='Bearer '+state.token;if(state.selectedCompany?.id&&!isTenantScopedPath(path))h['X-Company-Id']=state.selectedCompany.id;let r;try{r=await fetch('/api'+path,{...opt,headers:h})}catch{throw new ApiError('Não foi possível conectar ao servidor.',0,'NETWORK')}if(!r.ok){let e={};try{e=await r.json()}catch{}const err=new ApiError(humanApiError(r.status,e),r.status,e.error);if(r.status===401&&path!=='/auth/login'&&path!=='/auth/password')clearSession(err.message);throw err}return r.status===204?null:r.json()};
 const toast=(m,type='info')=>{const x=document.createElement('div');const kinds={success:'toast-success',info:'toast-info',warning:'toast-warning',error:'toast-error'};x.className='toast '+(kinds[type]||kinds.info);x.setAttribute('role','status');x.textContent=m;document.body.append(x);setTimeout(()=>x.remove(),3600)};
 const listItems=d=>Array.isArray(d)?d:(d&&d.items)||[];
@@ -17,21 +18,40 @@ async function withList(c,loader,draw){c.innerHTML=skeletonPage();try{draw(await
 function authHeaders(path){const h={};if(state.token)h.Authorization='Bearer '+state.token;if(state.selectedCompany?.id&&!isTenantScopedPath(path||''))h['X-Company-Id']=state.selectedCompany.id;return h}
 function rememberedLogin(){try{return{tenant:localStorage.getItem('ccc_last_tenant')||'',email:localStorage.getItem('ccc_last_email')||''}}catch{return{tenant:'',email:''}}}
 function rememberLogin(tenant,email){try{if(tenant)localStorage.setItem('ccc_last_tenant',String(tenant).trim());if(email)localStorage.setItem('ccc_last_email',String(email).trim())}catch{/* ignore */}}
+function loginCdsMarkHtml(){return `<div class="login-office-placeholder"><span class="login-bars" aria-hidden="true"></span><div><strong>SUA CONTABILIDADE</strong><small>SOLUÇÕES PARA SEU CRESCIMENTO</small></div></div>`}
 function login(){
   const rem=rememberedLogin();
   const demoTenant='escritorio-demonstracao';
   const demoEmail='admin@demo.local';
   const demoPass='Admin@123';
-  // Sem memória local, assume demo imediatamente (health confirma em seguida).
   const guessDemo=!rem.tenant&&!rem.email;
-  document.body.innerHTML=`<div class="login"><form class="login-card" id="login" autocomplete="off"><div class="brand">CDS <span>Contábil Connect</span></div><h1>Entrar no escritório</h1><p>Plataforma do escritório contábil para a carteira de empresas.</p><div class="field"><label for="tenant">Código do escritório</label><input id="tenant" name="tenant" required value="${esc(rem.tenant||(guessDemo?demoTenant:''))}" autocomplete="organization"></div><div class="field"><label for="email">E-mail</label><input id="email" name="email" type="email" required value="${esc(rem.email||(guessDemo?demoEmail:''))}" autocomplete="username"></div><div class="field"><label for="password">Senha</label><input id="password" name="password" type="password" required value="${guessDemo?esc(demoPass):''}" autocomplete="current-password"></div><p class="muted demo-hint" ${guessDemo?'':'hidden'}>Conta de demonstração: <b>${demoTenant}</b> / <b>${demoEmail}</b> / <b>${demoPass}</b><br>Esta tela é do <b>escritório (contador)</b>. O portal do cliente fica em <code>http://localhost:3334/</code>.</p><button class="btn" style="width:100%;margin-top:8px">Acessar plataforma</button></form></div>`;
+  const feat=(name,title,desc)=>`<li><span class="login-feat-ico" aria-hidden="true">${icon(name)}</span><div><b>${title}</b><small>${desc}</small></div></li>`;
+  document.body.innerHTML=`<div class="login"><div class="login-shell"><aside class="login-hero"><div class="login-hero-top"><div class="login-hero-brand"><img class="login-hero-logo" src="/assets/cds-wordmark.png?v=s28-4-2" alt="CDS Contábil Connect — Gestão contábil sem fronteiras"></div></div><div class="login-hero-mid"><h2 class="login-hero-lead">CONTABILIDADE<br><em>MAIS PRÓXIMA</em><br>DO SEU NEGÓCIO</h2><p class="login-hero-sub">Organização, agilidade e inteligência para você e sua empresa.</p><ul class="login-hero-list">${feat('chart','Gestão simplificada','Informações sempre à mão')}${feat('shield','Mais segurança','Seus dados protegidos')}${feat('users','Conexão em tempo real','Você e seu contador mais próximos')}</ul></div><p class="login-hero-foot"><span>CONTABILIDADE</span><span>TECNOLOGIA</span><span>PARCERIA</span><span>RESULTADOS</span></p></aside><div class="login-pane"><p class="login-motto">INTELIGÊNCIA CONTÁBIL<br>PARA UM AMANHÃ MAIOR.</p><form class="login-card" id="login" autocomplete="off"><div class="login-office-brand" id="loginOfficeBrand">${loginCdsMarkHtml()}</div><h1>Acesse sua conta</h1><p>Entre para continuar no seu ambiente contábil</p><div class="field login-input"><label class="sr-only" for="tenant">Código do escritório</label><span class="login-input-ico">${icon('building')}</span><input id="tenant" name="tenant" required placeholder="Código do escritório" value="${esc(rem.tenant||(guessDemo?demoTenant:''))}" autocomplete="organization"></div><div class="field login-input"><label class="sr-only" for="email">E-mail ou usuário</label><span class="login-input-ico">${icon('mail')}</span><input id="email" name="email" type="email" required placeholder="E-mail ou usuário" value="${esc(rem.email||(guessDemo?demoEmail:''))}" autocomplete="username"></div><div class="field login-input"><label class="sr-only" for="password">Senha</label><span class="login-input-ico">${icon('lock')}</span><input id="password" name="password" type="password" required placeholder="Senha" value="${guessDemo?esc(demoPass):''}" autocomplete="current-password"></div><div class="login-row"><label class="login-remember"><input type="checkbox" name="remember" ${rem.tenant||rem.email?'checked':''}> Lembrar-me</label><button type="button" class="login-link" id="forgotPassword">Esqueci minha senha</button></div><p class="muted demo-hint" ${guessDemo?'':'hidden'}>Conta de demonstração: <b>${demoTenant}</b> / <b>${demoEmail}</b> / <b>${demoPass}</b></p><button class="btn login-submit" type="submit">${icon('logIn')} Entrar</button><div class="login-or"><span>OU</span></div><button type="button" class="btn login-outline" id="requestAccess">${icon('userPlus')} Solicitar acesso</button></form><footer class="login-legal"><nav><button type="button" class="login-legal-link" data-legal="termos">Termos de uso</button><button type="button" class="login-legal-link" data-legal="privacidade">Política de privacidade</button><button type="button" class="login-legal-link" data-legal="suporte">Suporte</button></nav><p>© 2026 CDS Contábil Connect. Todos os direitos reservados.</p></footer></div></div></div>`;
   const t=$('#tenant'),e=$('#email'),p=$('#password'),hint=document.querySelector('.demo-hint');
+  const brandBox=$('#loginOfficeBrand');
+  let brandSeq=0;
+  const paintLoginBrand=(data)=>{
+    if(!brandBox)return;
+    if(data&&data.configured&&data.logo_url){
+      brandBox.innerHTML=`<img class="login-office-logo" src="${esc(data.logo_url)}" alt="Logo ${esc(data.office_name||'do escritório')}">${data.office_name?`<strong class="login-office-name">${esc(data.office_name)}</strong>`:''}<div class="login-cds-soft muted">CDS Contábil Connect</div>`;
+      return;
+    }
+    brandBox.innerHTML=loginCdsMarkHtml();
+  };
+  const loadLoginBrand=()=>{
+    const code=String((t&&t.value)||'').trim();
+    if(!code){paintLoginBrand(null);return}
+    const seq=++brandSeq;
+    fetch('/api/public/branding?tenant='+encodeURIComponent(code)).then(r=>r.json()).then(data=>{if(seq!==brandSeq)return;paintLoginBrand(data)}).catch(()=>{if(seq===brandSeq)paintLoginBrand(null)});
+  };
+  if(t){t.addEventListener('input',debounce(loadLoginBrand,350));t.addEventListener('change',loadLoginBrand);loadLoginBrand()}
   fetch('/api/health').then(r=>r.json()).then(h=>{
     if(h&&h.demo){
       if(t&&!t.value)t.value=demoTenant;
       if(e&&!e.value)e.value=demoEmail;
       if(p&&!p.value)p.value=demoPass;
       if(hint)hint.hidden=false;
+      loadLoginBrand();
       return;
     }
     if(guessDemo){
@@ -39,21 +59,37 @@ function login(){
       if(e&&e.value===demoEmail)e.value='';
       if(p&&p.value===demoPass)p.value='';
       if(hint)hint.hidden=true;
+      loadLoginBrand();
     }
   }).catch(()=>{});
   $('#login').onsubmit=async ev=>{
     ev.preventDefault();
     try{
-      const body=Object.fromEntries(new FormData(ev.target));
+      const fd=new FormData(ev.target);
+      const remember=fd.get('remember')==='on';
+      const body={tenant:fd.get('tenant'),email:fd.get('email'),password:fd.get('password')};
       const x=await api('/auth/login',{method:'POST',body:JSON.stringify(body)});
-      rememberLogin(body.tenant,body.email);
+      if(remember)rememberLogin(body.tenant,body.email);
+      else try{localStorage.removeItem('ccc_last_tenant');localStorage.removeItem('ccc_last_email')}catch{}
       state.token=x.token;
-      localStorage.setItem('ccc_token',x.token);
+      setOfficeToken(x.token);
       state.user=x.user;
       if(x.user.role==='CLIENT'){window.location.href='/portal/';return}
       render();
     }catch(err){toast(err.message,'error')}
   };
+  $('#forgotPassword')&&($('#forgotPassword').onclick=async()=>{
+    const tenant=String((t&&t.value)||'').trim();
+    const email=String((e&&e.value)||'').trim();
+    if(!tenant||!email){toast('Informe o código do escritório e o e-mail.','warning');return}
+    try{
+      const r=await fetch('/api/auth/forgot-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenant,email})});
+      const data=await r.json().catch(()=>({}));
+      toast(data.message||'Se os dados informados corresponderem a um acesso cadastrado, o escritório será notificado.','info');
+    }catch{toast('Não foi possível enviar a solicitação.','error')}
+  });
+  $('#requestAccess')&&($('#requestAccess').onclick=()=>toast('Solicite o acesso ao administrador do escritório.','info'));
+  document.querySelectorAll('[data-legal]').forEach(btn=>btn.onclick=()=>toast('Fale com o escritório para receber este documento.','info'));
 }
 const originLabel=o=>({PORTAL_CLIENTE:'Portal do Cliente',PORTAL_ESCRITORIO:'Portal do Escritório',CDS_SISTEMAS:'CDS Sistemas',IMPORTACAO_CONTABIL:'Importação Contábil',IMPORTACAO_FISCAL:'Importação Fiscal',OUTRA_ORIGEM_FUTURA:'Outra origem',EXPENSE:'Despesa',REVENUE:'Receita',MANUAL:'Lançamento manual',CLIENT:'Portal do Cliente',OFFICE:'Portal do Escritório',BOTH:'Despesa e receita',PIX:'PIX',DINHEIRO:'Dinheiro',DEBITO:'Cartão de débito',CREDITO:'Cartão de crédito',TRANSFERENCIA:'Transferência',BOLETO:'Boleto',OUTRO:'Outro',OPEN:'Aberta',CONCLUDED:'Concluída',CANCELLED:'Cancelada',DOCUMENT:'Documento',QUESTION:'Dúvida',GENERAL:'Geral',PENDING_REVIEW:'Pendente de análise',ACTIVE:'Ativo',INACTIVE:'Inativo',HIGH:'Alta',LOW:'Baixa',NORMAL:'Normal',URGENTE:'Urgente',COMPLETED:'Concluída',PENDENTE:'Pendente',PROCESSANDO:'Processando',CONCLUIDA:'Concluída',CONCLUIDA_COM_ERROS:'Concluída com erros',ERRO:'Erro',EMAIL:'E-mail',WHATSAPP:'WhatsApp',SMS:'SMS',PENDING:'Aguardando aprovação',PENDING_APPROVAL:'Aguardando aprovação',POSTED:'Lançado',REJECTED:'Rejeitado',ACCOUNTED:'Contabilizado',NEEDS_CLASSIFICATION:'Aguardando classificação',SENT:'Enviado',FAILED:'Falhou',QUEUED:'Na fila',PROCESSING:'Processando',DELIVERED:'Entregue',META:'Meta',SMTP:'SMTP',CDS:'CDS',dominio:'Domínio',contaazul:'Conta Azul',alterdata:'Alterdata',fortes:'Fortes',questor:'Questor',sci:'SCI',RULE:'Regra contábil',CATEGORY:'Categoria',BANK:'Banco ou caixa'}[o]||'-');
 function classificationReasonLabel(text){const raw=String(text||'').trim();if(!raw)return '';const map={'Nenhuma regra ou fallback suficiente.':'Não encontramos uma regra contábil para esta movimentação. Informe débito e crédito.','Classificação ambígua ou com evidência insuficiente; revisão do contador.':'Há mais de uma possibilidade. Confira as contas e confirme o lançamento.','Revisão do motor':'Informe débito e crédito desta movimentação.','Categoria vinculada a conta analítica':'Sugestão pela categoria da movimentação.','Banco/caixa vinculado a conta analítica':'Sugestão pelo banco ou caixa informado.','Somente categoria vinculada; falta contraparte':'A despesa possui categoria com conta, mas o banco ainda não possui conta contábil vinculada.','Somente banco/caixa vinculado; falta contraparte':'A despesa ainda não possui categoria contábil configurada.'};if(map[raw])return map[raw];if(/fallback/i.test(raw))return 'Não encontramos uma regra contábil para esta movimentação. Informe débito e crédito.';return raw}
@@ -77,22 +113,132 @@ const companyContextNav=contextMenuGroups.flatMap(g=>g.items.map(([p,l])=>[p,l])
 const officeOnly=['aprovacao','plano','regras','exportacoes','usuarios','auditoria','comunicacoes'];
 function activeNavGroups(){return state.selectedCompany?contextMenuGroups:menuGroups}
 function navLabel(page){const hit=activeNavGroups().flatMap(g=>g.items).find(x=>x[0]===page);if(hit)return hit[1];return page==='dashboard'?'Início':page}
-const icon=(name,cls='')=>{const paths={building:'<path d="M3 21h18M5 21V5l7-3 7 3v16M9 9h1m4 0h1m-6 4h1m4 0h1m-6 4h1m4 0h1"/>',users:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7-3a3 3 0 0 1 0 6m4 7v-2a4 4 0 0 0-3-3"/>',file:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M8 13h8m-8 4h6"/>',message:'<path d="M21 11.5a8.4 8.4 0 0 1-9 8.5 9.4 9.4 0 0 1-4-.9L3 21l1.9-4A8.4 8.4 0 0 1 3 11.5 8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5Z"/>',arrowDown:'<path d="M12 3v14m-5-5 5 5 5-5M5 21h14"/>',arrowUp:'<path d="M12 21V7m5 5-5-5-5 5M5 3h14"/>',book:'<path d="M4 5a3 3 0 0 1 3-3h13v17H7a3 3 0 0 0-3 3Zm0 0v17m3-14h9"/>',check:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',tag:'<path d="m20 13-7 7-10-10V3h7l10 10Z"/><circle cx="7" cy="7" r="1"/>',bank:'<path d="m3 10 9-7 9 7M5 10v8m4-8v8m6-8v8m4-8v8M3 21h18"/>',settings:'<path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="m19.4 15 .1.1a2 2 0 1 1-2.8 2.8l-.1-.1a2 2 0 0 0-3.4 1.4v.3a2 2 0 1 1-4 0v-.2A2 2 0 0 0 5.8 18l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a2 2 0 0 0-1.4-3.4h-.3a2 2 0 1 1 0-4h.2A2 2 0 0 0 3 4.4l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a2 2 0 0 0 3.4-1.4v-.3a2 2 0 1 1 4 0v.2A2 2 0 0 0 16.6 1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a2 2 0 0 0 1.4 3.4h.3a2 2 0 1 1 0 4h-.2a2 2 0 0 0-1.5 3.8Z"/>',chart:'<path d="M4 19V5m0 14h16M8 16v-4m4 4V8m4 8V5"/>',shield:'<path d="M12 3 20 6v5c0 5-3.4 8.5-8 10-4.6-1.5-8-5-8-10V6l8-3Z"/><path d="m9 12 2 2 4-4"/>',home:'<path d="m3 11 9-8 9 8M5 10v10h14V10M9 20v-6h6v6"/>',bell:'<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9m4.3 13a1.8 1.8 0 0 0 3.4 0"/>',search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',chevron:'<path d="m9 18 6-6-6-6"/>',collapse:'<path d="m15 18-6-6 6-6"/>',menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',help:'<circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4m.05 3h.1"/>'};return `<svg class="menu-icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]||paths.file}</svg>`};
+const icon=(name,cls='')=>{const paths={building:'<path d="M3 21h18M5 21V5l7-3 7 3v16M9 9h1m4 0h1m-6 4h1m4 0h1m-6 4h1m4 0h1"/>',users:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7-3a3 3 0 0 1 0 6m4 7v-2a4 4 0 0 0-3-3"/>',file:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M8 13h8m-8 4h6"/>',message:'<path d="M21 11.5a8.4 8.4 0 0 1-9 8.5 9.4 9.4 0 0 1-4-.9L3 21l1.9-4A8.4 8.4 0 0 1 3 11.5 8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5Z"/>',arrowDown:'<path d="M12 3v14m-5-5 5 5 5-5M5 21h14"/>',arrowUp:'<path d="M12 21V7m5 5-5-5-5 5M5 3h14"/>',book:'<path d="M4 5a3 3 0 0 1 3-3h13v17H7a3 3 0 0 0-3 3Zm0 0v17m3-14h9"/>',check:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',tag:'<path d="m20 13-7 7-10-10V3h7l10 10Z"/><circle cx="7" cy="7" r="1"/>',bank:'<path d="m3 10 9-7 9 7M5 10v8m4-8v8m6-8v8m4-8v8M3 21h18"/>',settings:'<path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="m19.4 15 .1.1a2 2 0 1 1-2.8 2.8l-.1-.1a2 2 0 0 0-3.4 1.4v.3a2 2 0 1 1-4 0v-.2A2 2 0 0 0 5.8 18l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a2 2 0 0 0-1.4-3.4h-.3a2 2 0 1 1 0-4h.2A2 2 0 0 0 3 4.4l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a2 2 0 0 0 3.4-1.4v-.3a2 2 0 1 1 4 0v.2A2 2 0 0 0 16.6 1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a2 2 0 0 0 1.4 3.4h.3a2 2 0 1 1 0 4h-.2a2 2 0 0 0-1.5 3.8Z"/>',chart:'<path d="M4 19V5m0 14h16M8 16v-4m4 4V8m4 8V5"/>',shield:'<path d="M12 3 20 6v5c0 5-3.4 8.5-8 10-4.6-1.5-8-5-8-10V6l8-3Z"/><path d="m9 12 2 2 4-4"/>',mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',lock:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',logIn:'<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>',userPlus:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm10-4v6m3-3h-6"/>',home:'<path d="m3 11 9-8 9 8M5 10v10h14V10M9 20v-6h6v6"/>',bell:'<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9m4.3 13a1.8 1.8 0 0 0 3.4 0"/>',search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',chevron:'<path d="m9 18 6-6-6-6"/>',collapse:'<path d="m15 18-6-6 6-6"/>',menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',help:'<circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4m.05 3h.1"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'};return `<svg class="menu-icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]||paths.file}</svg>`};
 const initials=name=>String(name||'').split(/\s+/).filter(Boolean).slice(0,2).map(x=>x[0]).join('').toUpperCase()||'US';const roleLabel=role=>({OWNER:'Administrador',ACCOUNTANT:'Contador',STAFF:'Equipe',CLIENT:'Cliente'}[role]||role);const translateRoleOptions=()=>document.querySelectorAll('select[name="role"] option').forEach(option=>{const label=roleLabel(option.value||option.textContent);if(option.textContent!==label)option.textContent=label});new MutationObserver(translateRoleOptions).observe(document.body,{childList:true,subtree:true});
 const sidebarCounters={};
 async function loadBase(){const keep=p=>p.catch(e=>{if(e&&e.status===401)throw e;return null});const [plans,categories,banks,rules,tenant,branding]=await Promise.all([keep(api('/plano-contas')),keep(api('/categorias')),keep(api('/bancos')),keep(api('/regras-contabeis')),keep(api('/tenant')),keep(api('/tenant/branding'))]);state.plans=plans||[];state.categories=categories||[];state.banks=banks||[];state.rules=rules||[];state.tenant=tenant||state.tenant||null;state.companies=[];await applyBranding(branding);if(state.plans[0])state.accounts=await keep(api('/plano-contas/'+state.plans[0].id+'/accounts'))||[]}
-async function applyBranding(payload){state.branding=payload||null;if(state.brandingLogoSrc){try{URL.revokeObjectURL(state.brandingLogoSrc)}catch{}state.brandingLogoSrc=null}if(!payload||!payload.has_logo)return;try{const r=await fetch('/api/tenant/branding/logo',{headers:authHeaders('/tenant/branding/logo')});if(!r.ok)return;state.brandingLogoSrc=URL.createObjectURL(await r.blob())}catch(e){if(e&&e.status===401)throw e}}
-function officeIdentityHtml(){const b=state.branding||{};const name=b.office_name||(state.tenant&&state.tenant.name)||state.user&&state.user.tenant_name||'Escritório';if(state.brandingLogoSrc)return `<aside class="office-identity" id="officeIdentity"><img src="${state.brandingLogoSrc}" alt="Logo do escritório ${esc(name)}"><strong>${esc(name)}</strong>${b.slogan?`<small>${esc(b.slogan)}</small>`:''}</aside>`;return `<aside class="office-identity placeholder" id="officeIdentity"><div class="office-mark">${esc(initials(name))}</div><strong>${esc(name)}</strong><small>Configure a identidade do seu escritório</small></aside>`}
-async function loadSidebarCounters(){const safe=promise=>promise.catch(e=>{if(e&&e.status===401)throw e;return{items:[],total:0,length:0}});const [dash,companies]=await Promise.all([safe(api('/dashboard')),safe(api('/empresas?page=1&page_size=1'))]);sidebarCounters.empresas=companies.total||0;sidebarCounters.documentos=dash.documents_received||dash.documents||null;sidebarCounters.solicitacoes=dash.open_requests||null;sidebarCounters.pendencias=dash.companies_with_pendencies||null;sidebarCounters.despesas=null;sidebarCounters.receitas=null;sidebarCounters.aprovacao=Number(dash.entries_awaiting_approval||dash.pending||0)||null;sidebarCounters.classificacao=Number(dash.expenses_awaiting_classification||0)||null;sidebarCounters.lancamentos=null;sidebarCounters.usuarios=null}
+async function applyBranding(payload){state.branding=payload||null;if(state.brandingLogoSrc){try{URL.revokeObjectURL(state.brandingLogoSrc)}catch{}state.brandingLogoSrc=null}if(!payload||!(payload.has_logo||payload.configured))return;try{const url=payload.logo_url&&payload.logo_url.startsWith('/api/')?payload.logo_url:'/api/tenant/branding/logo';const r=await fetch(url,{headers:authHeaders('/tenant/branding/logo')});if(!r.ok)return;state.brandingLogoSrc=URL.createObjectURL(await r.blob())}catch(e){if(e&&e.status===401)throw e}}
+function officeIdentityHtml(){const b=state.branding||{};const name=b.office_name||(state.tenant&&state.tenant.name)||state.user&&state.user.tenant_name||'Escritório';const copy=`<div><small>ESCRITÓRIO</small><strong>${esc(name)}</strong>${b.slogan?`<small>${esc(b.slogan)}</small>`:state.brandingLogoSrc?'':`<small>Configure a identidade do seu escritório</small>`}</div>`;if(state.brandingLogoSrc)return `<aside class="office-identity side-office-card" id="officeIdentity"><img src="${state.brandingLogoSrc}" alt="Logo do escritório ${esc(name)}">${copy}</aside>`;return `<aside class="office-identity placeholder side-office-card" id="officeIdentity"><div class="office-mark">${esc(initials(name))}</div>${copy}</aside>`}
+async function loadSidebarCounters(){const safe=promise=>promise.catch(e=>{if(e&&e.status===401)throw e;return{items:[],total:0,length:0,unread_total:0}});const [dash,companies,reqs]=await Promise.all([safe(api('/dashboard')),safe(api('/empresas?page=1&page_size=1')),safe(api('/solicitacoes/nao-lidas'))]);sidebarCounters.empresas=companies.total||0;sidebarCounters.documentos=dash.documents_received||dash.documents||null;sidebarCounters.solicitacoes=Number(reqs.unread_total||0)||null;sidebarCounters.pendencias=dash.companies_with_pendencies||null;sidebarCounters.despesas=null;sidebarCounters.receitas=null;sidebarCounters.aprovacao=Number(dash.entries_awaiting_approval||dash.pending||0)||null;sidebarCounters.classificacao=Number(dash.expenses_awaiting_classification||0)||null;sidebarCounters.lancamentos=null;sidebarCounters.usuarios=null}
 function greetUser(){const h=new Date().getHours();const g=h<12?'Bom dia':h<18?'Boa tarde':'Boa noite';return `${g}, ${esc((state.user.name||'').split(' ')[0]||'olá')}!`}
+function officeClockHtml(){const now=new Date();const date=now.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});const time=now.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});return `<div class="ops-clock" aria-label="${esc(date)}, ${esc(time)}"><span>${esc(date)}</span><strong>${esc(time)}</strong></div>`}
+function systemStatusHtml(){return `<span class="ops-sys-status" title="Sistema operacional"><i aria-hidden="true"></i> Sistema online</span>`}
 function originBars(origins){const rows=origins&&origins.length?origins.slice():[];if(!rows.some(x=>x.origin==='CDS_SISTEMAS'||x.origin_label==='CDS Sistemas'))rows.push({origin:'CDS_SISTEMAS',origin_label:'CDS Sistemas',count:0});const max=Math.max(1,...rows.map(x=>Number(x.count||0)));return rows.map(x=>`<div class="origin-bar"><span>${esc(x.origin_label||originLabel(x.origin))}</span><div class="bar" aria-hidden="true"><i style="width:${Math.round(100*Number(x.count||0)/max)}%"></i></div><b>${Number(x.count||0)}</b></div>`).join('')}
 function donutHtml(parts){const total=parts.reduce((a,p)=>a+Number(p.value||0),0);if(!total)return emptyState('Sem série histórica','Ainda não há dados suficientes para o gráfico da carteira.');let acc=0;const circ=2*Math.PI*36;const rings=parts.filter(p=>p.value>0).map(p=>{const frac=p.value/total;const len=circ*frac;const dash=len+' '+(circ-len);const rot=(acc/total)*360-90;acc+=p.value;return `<circle cx="50" cy="50" r="36" fill="none" stroke="${p.color}" stroke-width="12" stroke-dasharray="${dash}" stroke-linecap="round" transform="rotate(${rot} 50 50)"/>`}).join('');return `<div class="donut-wrap"><svg class="donut" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="36" fill="none" stroke="#e7eeec" stroke-width="12"/>${rings}</svg><div class="legend">${parts.map(p=>`<div><span class="badge ${p.cls}">${esc(p.label)}</span><b>${p.value}</b></div>`).join('')}</div></div>`}
 function renderBadge(page){const value=Number(sidebarCounters[page]||0);return value>0?`<span class="menu-badge">${value}</span>`:''}
 function renderMenuItem(item){const [page,label,iconName]=item;const allowed=!officeOnly.includes(page)||['OWNER','ACCOUNTANT','STAFF'].includes(state.user.role);if(!allowed)return '';return `<button class="menu-item ${state.page===page?'active':''}" data-page="${page}" title="${esc(label)}" aria-label="Abrir ${esc(label)}">${icon(iconName)}<span class="menu-label">${esc(label)}</span>${renderBadge(page)}${icon('chevron','menu-chevron')}</button>`}
-function renderSidebar(){const groups=activeNavGroups();const office=esc(roleLabel(state.user.role));return `<aside class="side" id="sidebar"><div class="sidebar-head"><div class="brand-mark">CDS</div><div class="brand-copy"><strong>CONTÁBIL CONNECT</strong><small>Conectando empresas ao futuro contábil</small></div><button class="icon-button sidebar-toggle" id="collapseSidebar" aria-label="Recolher menu" title="Recolher menu">${icon('collapse')}</button></div><div class="profile-card"><div class="avatar">${initials(state.user.name)}</div><div class="profile-copy"><strong>${esc(state.user.name)}</strong><small>${office}</small><small>${esc(state.user.tenant_name||'Escritório contábil')}</small></div></div><div class="menu-search"><label for="menuSearch" class="sr-only">Buscar no menu</label>${icon('search')}<input id="menuSearch" placeholder="Buscar no menu..." autocomplete="off"><kbd>Ctrl K</kbd></div><nav class="sidebar-nav" id="sidebarNav">${state.selectedCompany?'':`<button class="menu-item dashboard-link ${state.page==='dashboard'?'active':''}" data-page="dashboard" title="Início" aria-label="Abrir Início">${icon('home')}<span class="menu-label">Início</span>${icon('chevron','menu-chevron')}</button>`}${groups.map(group=>`<section class="menu-group"><h2>${group.title}</h2>${group.items.map(renderMenuItem).join('')}</section>`).join('')}</nav><footer class="sidebar-footer"><button class="footer-action logout-link" id="logout" aria-label="Sair do sistema">${icon('shield')}<span class="menu-label">Sair do sistema</span></button><button class="footer-action" id="collapseSidebarFooter" aria-label="Recolher menu">${icon('collapse')}<span class="menu-label">Recolher menu</span></button></footer></aside>`}
-async function restoreCompanyFromUrl(){const m=location.pathname.match(/^\/empresas\/([^/]+)\/?$/);if(!m){state.selectedCompany=null;return}if(state.selectedCompany?.id===m[1])return;state.selectedCompany=null;try{const x=await api('/empresas/'+m[1]);state.selectedCompany={id:x.id,name:x.name,trade_name:x.trade_name,cnpj:x.cnpj,status:x.status};if(!state.page||state.page==='empresas')state.page='dashboard'}catch{history.replaceState({},'','/');state.page='empresas';toast('Não foi possível acessar esta empresa.')}}
-async function enterCompany(id,page){try{state.selectedCompany=null;const x=await api('/empresas/'+id);state.selectedCompany={id:x.id,name:x.name,trade_name:x.trade_name,cnpj:x.cnpj,status:x.status};state.companyView=null;state.companyUsers=null;state.page=page||'dashboard';history.pushState({company:x.id},'', '/empresas/'+x.id);await render()}catch(err){toast(err.message)}}
-function leaveCompany(){state.selectedCompany=null;state.page='empresas';history.pushState({},'','/');render()}
+function renderSidebar(){const groups=activeNavGroups();const office=esc(roleLabel(state.user.role));return `<aside class="side" id="sidebar"><div class="sidebar-head"><img class="brand-mark" src="/assets/cds-pwa-192.png?v=s28-4-2" alt="CDS Contábil Connect" width="40" height="40"><div class="brand-copy"><strong>CONTÁBIL CONNECT</strong><small>Conectando empresas ao futuro contábil</small></div><button class="icon-button sidebar-toggle" id="collapseSidebar" aria-label="Recolher menu" title="Recolher menu">${icon('collapse')}</button></div><div class="profile-card"><div class="avatar">${initials(state.user.name)}</div><div class="profile-copy"><strong>${esc(state.user.name)}</strong><small>${office}</small><small>${esc(state.user.tenant_name||'Escritório contábil')}</small></div></div><div class="menu-search"><label for="menuSearch" class="sr-only">Buscar no menu</label>${icon('search')}<input id="menuSearch" placeholder="Buscar no menu..." autocomplete="off"><kbd>Ctrl K</kbd></div><nav class="sidebar-nav" id="sidebarNav">${state.selectedCompany?'':`<button class="menu-item dashboard-link ${state.page==='dashboard'?'active':''}" data-page="dashboard" title="Início" aria-label="Abrir Início">${icon('home')}<span class="menu-label">Início</span>${icon('chevron','menu-chevron')}</button>`}${groups.map(group=>`<section class="menu-group"><h2>${group.title}</h2>${group.items.map(renderMenuItem).join('')}</section>`).join('')}</nav>${officeIdentityHtml()}<footer class="sidebar-footer"><button class="footer-action logout-link" id="logout" aria-label="Sair do sistema">${icon('shield')}<span class="menu-label">Sair do sistema</span></button><button class="footer-action" id="collapseSidebarFooter" aria-label="Recolher menu">${icon('collapse')}<span class="menu-label">Recolher menu</span></button></footer></aside>`}
+async function restoreCompanyFromUrl(){
+  const deep=location.pathname.match(/^\/empresas\/([^/]+)\/solicitacoes\/([^/]+)\/?$/);
+  if(deep){
+    const companyId=deep[1], requestId=deep[2];
+    try{
+      const x=await api('/empresas/'+companyId);
+      state.selectedCompany={id:x.id,name:x.name,trade_name:x.trade_name,cnpj:x.cnpj,status:x.status};
+      state.page='solicitacoes';
+      state.requestView=requestId;
+      return;
+    }catch{history.replaceState({},'','/');state.page='empresas';toast('Não foi possível acessar esta empresa.');return}
+  }
+  const m=location.pathname.match(/^\/empresas\/([^/]+)\/?$/);
+  if(!m){state.selectedCompany=null;return}
+  if(state.selectedCompany?.id===m[1])return;
+  state.selectedCompany=null;
+  try{
+    const x=await api('/empresas/'+m[1]);
+    state.selectedCompany={id:x.id,name:x.name,trade_name:x.trade_name,cnpj:x.cnpj,status:x.status};
+    if(!state.page||state.page==='empresas')state.page='dashboard';
+  }catch{history.replaceState({},'','/');state.page='empresas';toast('Não foi possível acessar esta empresa.')}
+}
+async function enterCompany(id,page){
+  const requestId=arguments.length>2?arguments[2]:null;
+  try{
+    state.selectedCompany=null;
+    const x=await api('/empresas/'+id);
+    state.selectedCompany={id:x.id,name:x.name,trade_name:x.trade_name,cnpj:x.cnpj,status:x.status};
+    state.companyView=null;
+    state.companyUsers=null;
+    state.page=page||'dashboard';
+    if(requestId){
+      state.requestView=requestId;
+      state.page='solicitacoes';
+      history.pushState({company:x.id,request:requestId},'','/empresas/'+x.id+'/solicitacoes/'+requestId);
+    }else{
+      state.requestView=null;
+      history.pushState({company:x.id},'', '/empresas/'+x.id);
+    }
+    await render();
+  }catch(err){toast(err.message)}
+}
+function openRequestConversation(companyId,requestId){
+  if(state.selectedCompany&&state.selectedCompany.id===companyId){
+    state.requestView=requestId;
+    state.page='solicitacoes';
+    history.pushState({company:companyId,request:requestId},'','/empresas/'+companyId+'/solicitacoes/'+requestId);
+    return render();
+  }
+  return enterCompany(companyId,'solicitacoes',requestId);
+}
+function leaveCompany(){state.selectedCompany=null;state.page='empresas';state.requestView=null;history.pushState({},'','/');render()}
+function requestStatusLabel(s){
+  const n=String(s||'').toUpperCase();
+  return({AGUARDANDO_CLIENTE:'Aguardando cliente',AGUARDANDO_ESCRITORIO:'Aguardando escritório',CONCLUDED:'Concluída',CONCLUIDA:'Concluída',CANCELLED:'Cancelada',CANCELADA:'Cancelada',OPEN:'Aguardando cliente',RESPONDED:'Aguardando escritório',PENDING:'Aguardando cliente'}[n]||originLabel(s)||n||'-');
+}
+function isRequestClosed(s){return ['CONCLUDED','CANCELLED','CONCLUIDA','CANCELADA'].includes(String(s||'').toUpperCase())}
+function requestPreview(x){
+  const m=x.last_message;
+  if(!m||!m.message)return 'Sem mensagens ainda';
+  const who=m.role==='CLIENT'?'Cliente':'Escritório';
+  const text=String(m.message).length>80?String(m.message).slice(0,80)+'…':m.message;
+  return who+': '+text;
+}
+function fmtMsgTime(ts){
+  if(!ts)return '';
+  try{
+    const d=new Date(String(ts).replace(' ','T'));
+    if(Number.isNaN(d.getTime()))return String(ts).slice(0,16);
+    return d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  }catch{return String(ts).slice(0,16)}
+}
+function showRequestAlert(payload){
+  showCenterAlert({
+    headline:'Nova mensagem',
+    company_name:payload.company_name,
+    description:payload.title?('respondeu à solicitação · '+payload.title):'respondeu à solicitação.',
+    preview:payload.preview||'Nova mensagem na solicitação.',
+    actionLabel:'Abrir conversa',
+    dedupeKey:(payload.request_id||'')+'|'+(payload.message_id||payload.preview||''),
+    onOpen:()=>{if(payload.company_id&&payload.request_id)openRequestConversation(payload.company_id,payload.request_id)}
+  });
+}
+function showCenterAlert(payload){
+  const dedupeKey=payload.dedupeKey||(payload.type||'')+'|'+(payload.entity_id||'')+'|'+(payload.preview||payload.headline||'');
+  if(window.__cdsCenterAlertKey===dedupeKey)return;
+  window.__cdsCenterAlertKey=dedupeKey;
+  const existing=$('#reqMsgAlert');
+  if(existing)existing.remove();
+  const company=esc(payload.company_name||'');
+  const headline=esc(payload.headline||'Atualização');
+  const description=esc(payload.description||payload.message||'');
+  const preview=esc(payload.preview||'');
+  const actionLabel=esc(payload.actionLabel||'Abrir');
+  document.body.insertAdjacentHTML('beforeend',`<div class="req-msg-alert" id="reqMsgAlert" role="status"><div class="req-msg-alert-inner"><div class="req-msg-alert-brand"><img src="/assets/cds-pwa-192.png" alt="" width="36" height="36"><div><strong>CDS Contábil Connect</strong><small>${headline}</small></div></div><div class="req-msg-alert-body">${company?`<div class="req-msg-alert-co">${company}</div>`:''}${description?`<div>${description}</div>`:''}${preview?`<div class="muted req-msg-alert-preview">"${preview}"</div>`:''}</div><div class="req-msg-alert-actions"><button type="button" class="btn" id="reqMsgOpen">${actionLabel}</button><button type="button" class="btn secondary" id="reqMsgDismiss">Fechar</button></div></div></div>`);
+  $('#reqMsgDismiss').onclick=()=>{$('#reqMsgAlert')?.remove();window.__cdsCenterAlertKey=null};
+  $('#reqMsgOpen').onclick=()=>{$('#reqMsgAlert')?.remove();window.__cdsCenterAlertKey=null;if(typeof payload.onOpen==='function')payload.onOpen()};
+  setTimeout(()=>{$('#reqMsgAlert')?.classList.add('fade');setTimeout(()=>{$('#reqMsgAlert')?.remove();window.__cdsCenterAlertKey=null},400)},12000);
+}
+function notifActionPage(n){
+  const t=String(n.type||'');
+  if(/REQUEST/.test(t)||n.entity_type==='request')return 'solicitacoes';
+  if(/DOCUMENT/.test(t)||n.entity_type==='document')return 'documentos';
+  if(/EXPENSE|REVENUE/.test(t)||n.entity_type==='expense'||n.entity_type==='revenue')return 'despesas';
+  if(/CLASSIFICATION|ENTRY_CREATED/.test(t))return 'classificacao';
+  if(/APPROVAL|ENTRY_APPROVED|ENTRY_REJECTED|ENTRY_POSTED/.test(t))return 'aprovacao';
+  if(/PROCESS/.test(t))return 'processos';
+  if(/IMPORT|INTEGRATION/.test(t))return 'importacoes';
+  if(/PENDENCY/.test(t))return 'pendencias';
+  return entityPage[n.entity_type]||'dashboard';
+}
 function pendencyKind(x){const type=String(x.entity_type||'').toUpperCase();const reason=String(x.reason||'').toLowerCase();const st=String(x.entry_status||x.related_status||'').toUpperCase();if(type==='DOCUMENT'||type==='DOCUMENTS'||/documento/.test(reason))return 'DOCUMENT';if(type==='REQUEST'||type==='SOLICITACAO'||/solicita/.test(reason))return 'REQUEST';if(type==='IMPORT'||type==='MOVEMENT_IMPORT'||/importa/.test(reason))return 'IMPORT';if(type==='EXPENSE'||(type!=='ENTRY'&&/despesa/.test(reason)))return 'EXPENSE';if(st==='PENDING'||st==='PENDING_APPROVAL'||/aprova/.test(reason))return 'APPROVAL';if(type==='ENTRY'||st==='NEEDS_CLASSIFICATION'||/classific/.test(reason))return 'CLASSIFICATION';return 'UNKNOWN'}
 function pendencyCopy(x){const kind=pendencyKind(x);const happened=x.reason||x.title||x.description||'-';return({CLASSIFICATION:{happened:happened||'Movimentação aguardando classificação',need:'Classificar a movimentação'},APPROVAL:{happened:'Classificação aguardando aprovação',need:'Revisar e aprovar a classificação'},DOCUMENT:{happened,need:'Conferir o documento'},REQUEST:{happened,need:'Responder a solicitação'},IMPORT:{happened,need:'Conferir a importação'},EXPENSE:{happened,need:'Conferir a despesa'},UNKNOWN:{happened,need:x.status==='OPEN'?'Informar ou regularizar o item.':'Acompanhar o andamento.'}}[kind])}
 function pendencyAction(x,inCompany){const kind=pendencyKind(x);const dest={CLASSIFICATION:{page:'classificacao',label:'Classificar →'},APPROVAL:{page:'aprovacao',label:'Aprovar →'},DOCUMENT:{page:'documentos',label:'Ver documento →'},REQUEST:{page:'solicitacoes',label:'Ver solicitação →'},IMPORT:{page:'importacoes',label:'Ver importação →'},EXPENSE:{page:'despesas',label:'Ver despesa →'},UNKNOWN:{page:null,label:'Ver detalhes'}}[kind];if(!inCompany)return{page:dest.page,label:'Acessar empresa →',enter:true};return dest}
@@ -127,6 +273,10 @@ async function openNotification(id){const n=(state.notifications?.items||[]).fin
     return;
   }
   const next=entityPage[n.entity_type]||'dashboard';
+  if((n.type==='REQUEST_MESSAGE_CREATED'||n.type==='REQUEST_UPDATED'||n.type==='REQUEST_CREATED'||n.entity_type==='request')&&n.company_id&&n.entity_id){
+    try{await openRequestConversation(n.company_id,n.entity_id)}catch(err){toast(err.message||'Registro indisponível.')}
+    return;
+  }
   if(n.company_id){
     if(state.selectedCompany&&state.selectedCompany.id!==n.company_id){toast('Esta notificação pertence a outra empresa.');}
     try{if(!state.selectedCompany||state.selectedCompany.id!==n.company_id){state.page=next;await enterCompany(n.company_id);return}state.page=next;await render()}catch(err){toast(err.message||'Registro indisponível.')}
@@ -135,8 +285,8 @@ async function openNotification(id){const n=(state.notifications?.items||[]).fin
   state.page=next;await render();
 }
 function bindNotifications(){const wrap=$('#notifWrap'),panel=$('#notifPanel'),toggle=$('#notifToggle');if(!toggle)return;toggle.onclick=e=>{e.stopPropagation();const open=panel.hidden;panel.hidden=!open;if(open)drawNotifList()};$('#notifReadAll')&&($('#notifReadAll').onclick=async()=>{try{await api('/notificacoes/lidas',{method:'POST',body:'{}'});drawNotifList();refreshNotifBadge()}catch(err){toast(err.message)}});if(!window.__cdsNotifDocBound){window.__cdsNotifDocBound=true;document.addEventListener('click',e=>{const w=document.querySelector('#notifWrap'),p=document.querySelector('#notifPanel');if(w&&p&&!w.contains(e.target))p.hidden=true})}}
-async function render(){if(!state.token)return login();try{state.user=state.user||await api('/auth/me');if(state.user.role==='CLIENT'){window.location.href='/portal/';return}await restoreCompanyFromUrl();await loadBase();await loadSidebarCounters()}catch(e){if(e&&e.status===401)return;if(!state.user){toast(e.message||'Não foi possível concluir a operação.','error');return}toast(e.message||'Não foi possível concluir a operação.','error')}
-try{const ctx=state.selectedCompany;const ctxNav=ctx?`<nav class="context-nav" aria-label="Contexto da empresa">${companyContextNav.map(([p,l])=>`<button type="button" class="chip ${state.page===p?'active':''}" data-page="${p}">${l}</button>`).join('')}</nav>`:'';const ctxBar=ctx?`<div class="context-bar"><button type="button" class="btn secondary" id="leaveCompany">← Empresas</button><div><strong>${esc(ctx.trade_name||ctx.name)}</strong><small>CNPJ ${esc(formatCnpj(ctx.cnpj)||'-')}</small> ${companyStatusBadge(ctx.status)}${ctxNav}</div></div>`:'';document.body.innerHTML=`<div class="app-shell"><div class="sidebar-overlay" id="sidebarOverlay"></div>${renderSidebar()}<main class="main"><header class="top"><button class="mobile-menu" id="mobileMenu" aria-label="Abrir menu">${icon('menu')}</button><div class="breadcrumb"><span>${ctx?'EMPRESA ATIVA':'VISÃO GERAL DO ESCRITÓRIO'}</span><strong>${esc(ctx?(ctx.trade_name||ctx.name):navLabel(state.page))}</strong></div><div class="top-search"><label class="sr-only" for="globalSearch">Pesquisa global</label>${icon('search')}<input id="globalSearch" class="search-input" placeholder="Pesquisar empresas, documentos, pendências..." autocomplete="off"><kbd>Ctrl K</kbd></div><div class="top-actions top-user">${notifHtml()}<button type="button" class="icon-button" id="helpBtn" aria-label="Ajuda" title="Ajuda">${icon('help')}</button><div class="user-menu" id="userMenu"><button type="button" class="user-chip" id="userMenuBtn" aria-haspopup="true" aria-expanded="false"><div class="top-avatar">${initials(state.user.name)}</div><span>${esc(state.user.name)}<small>${esc(roleLabel(state.user.role))}</small></span></button><div class="user-dropdown" id="userDropdown" hidden><button type="button" id="goProfile">Perfil</button><button type="button" id="goConfig">Configurações</button><button type="button" id="logoutTop">Sair</button></div></div></div></header>${ctxBar}<section class="content" id="content"></section></main></div>`;bindSidebar();bindNotifications();startNotifPoll();const leave=$('#leaveCompany');if(leave)leave.onclick=leaveCompany;bindChrome();try{await page()}catch(err){if(err&&err.status===401)return;const box=$('#content');if(box)box.innerHTML=emptyState('Não foi possível carregar',esc(err.message||'Não foi possível concluir a operação.'),'<button type="button" class="btn" id="retryPage">Tentar novamente</button>');$('#retryPage')&&($('#retryPage').onclick=()=>render())}}catch(e){if(e&&e.status===401)return;toast(e.message||'Não foi possível concluir a operação.','error')}}
+async function render(){if(!state.token)return login();try{state.user=state.user||await api('/auth/me');if(state.user.role==='CLIENT'){window.location.href='/portal/';return}try{if(state.token&&!localStorage.getItem('ccc_office_token')){localStorage.setItem('ccc_office_token',state.token);if(localStorage.getItem('ccc_token')===state.token)localStorage.removeItem('ccc_token')}}catch{}await restoreCompanyFromUrl();await loadBase();await loadSidebarCounters()}catch(e){if(e&&e.status===401)return;if(!state.user){toast(e.message||'Não foi possível concluir a operação.','error');return}toast(e.message||'Não foi possível concluir a operação.','error')}
+try{const ctx=state.selectedCompany;const ctxNav=ctx?`<nav class="context-nav" aria-label="Contexto da empresa">${companyContextNav.map(([p,l])=>`<button type="button" class="chip ${state.page===p?'active':''}" data-page="${p}">${l}</button>`).join('')}</nav>`:'';const ctxBar=ctx?`<div class="context-bar"><button type="button" class="btn secondary" id="leaveCompany">← Empresas</button><div><strong>${esc(ctx.trade_name||ctx.name)}</strong><small>CNPJ ${esc(formatCnpj(ctx.cnpj)||'-')}</small> ${companyStatusBadge(ctx.status)}${ctxNav}</div></div>`:'';const isDash=state.page==='dashboard';const searchHtml=isDash?'':`<div class="top-search"><label class="sr-only" for="globalSearch">Pesquisa global</label>${icon('search')}<input id="globalSearch" class="search-input" placeholder="Pesquisar empresas, documentos, pendências..." autocomplete="off"><kbd>Ctrl K</kbd></div>`;const periodHtml=isDash?opsPeriodSelectHtml():'';const clockHtml=isDash?officeClockHtml():'';const sysHtml=isDash?systemStatusHtml():'';const crumbTitle=ctx?esc(ctx.trade_name||ctx.name):(isDash?`${greetUser()} <span aria-hidden="true">👋</span>`:esc(navLabel(state.page)));const crumbSub=!ctx&&isDash?`<small class="dash-head-sub">Veja o resumo da operação do seu escritório.</small>`:'';document.body.innerHTML=`<div class="app-shell"><div class="sidebar-overlay" id="sidebarOverlay"></div>${renderSidebar()}<main class="main"><header class="top"><button class="mobile-menu" id="mobileMenu" aria-label="Abrir menu">${icon('menu')}</button><div class="breadcrumb${isDash?' dash-crumb':''}"><span>${ctx?'EMPRESA ATIVA':'VISÃO GERAL DO ESCRITÓRIO'}</span><strong>${crumbTitle}</strong>${crumbSub}</div>${searchHtml}<div class="top-actions top-user">${clockHtml}${notifHtml()}<button type="button" class="icon-button" id="helpBtn" aria-label="Ajuda" title="Ajuda">${icon('help')}</button><div class="user-menu" id="userMenu"><button type="button" class="user-chip" id="userMenuBtn" aria-haspopup="true" aria-expanded="false"><div class="top-avatar">${initials(state.user.name)}</div><span>${esc(state.user.name)}<small>${esc(roleLabel(state.user.role))}</small></span></button><div class="user-dropdown" id="userDropdown" hidden><button type="button" id="goProfile">Perfil</button><button type="button" id="goConfig">Configurações</button><button type="button" id="logoutTop">Sair</button></div></div>${sysHtml}${periodHtml}</div></header>${ctxBar}<section class="content" id="content"></section></main></div>`;bindSidebar();bindNotifications();startNotifPoll();if(typeof window.__cdsStartOfficeRealtime==='function')window.__cdsStartOfficeRealtime();const leave=$('#leaveCompany');if(leave)leave.onclick=leaveCompany;bindChrome();bindDashPeriod();try{await page()}catch(err){if(err&&err.status===401)return;const box=$('#content');if(box)box.innerHTML=emptyState('Não foi possível carregar',esc(err.message||'Não foi possível concluir a operação.'),'<button type="button" class="btn" id="retryPage">Tentar novamente</button>');$('#retryPage')&&($('#retryPage').onclick=()=>render())}}catch(e){if(e&&e.status===401)return;toast(e.message||'Não foi possível concluir a operação.','error')}}
 function bindSidebar(){const side=$('#sidebar'),setPage=page=>{if(page==='comunicacoes')state.commsTab='email';if(['comunicacoes','configuracoes','auditoria','ia'].includes(page)&&state.selectedCompany){state.selectedCompany=null;history.pushState({},'','/')}state.page=page;render()};document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{setPage(b.dataset.page);side.classList.remove('mobile-open');$('#sidebarOverlay')?.classList.remove('visible')});const toggle=()=>{const collapsed=side.classList.toggle('collapsed');localStorage.setItem('cds_admin_sidebar_collapsed',collapsed?'1':'0')};if(localStorage.getItem('cds_admin_sidebar_collapsed')==='1')side.classList.add('collapsed');$('#collapseSidebar').onclick=toggle;$('#collapseSidebarFooter').onclick=toggle;$('#logout').onclick=()=>{if(confirm('Tem certeza que deseja sair?')){fetch('/api/auth/logout',{method:'POST',headers:authHeaders()}).catch(()=>{});clearSession('Você saiu do sistema.')}};const search=$('#menuSearch');const filter=()=>{const q=search.value.toLowerCase().trim();document.querySelectorAll('.menu-item').forEach(item=>{item.hidden=!!q&&!item.textContent.toLowerCase().includes(q)});document.querySelectorAll('.menu-group').forEach(group=>{group.hidden=!!q&&!Array.from(group.querySelectorAll('.menu-item')).some(item=>!item.hidden)})};search.oninput=filter;search.onkeydown=e=>{if(e.key==='Enter'){const first=[...document.querySelectorAll('.menu-item')].find(x=>!x.hidden);if(first)first.click()}if(e.key==='Escape'){search.value='';filter();search.blur()}};document.onkeydown=e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();($('#globalSearch')||search).focus()}};$('#mobileMenu').onclick=()=>{side.classList.add('mobile-open');$('#sidebarOverlay').classList.add('visible')};$('#sidebarOverlay').onclick=()=>{side.classList.remove('mobile-open');$('#sidebarOverlay').classList.remove('visible')}}
 function bindChrome(){const gs=$('#globalSearch');if(gs){gs.onkeydown=e=>{if(e.key==='Enter'){const q=gs.value.trim();state.companySearch=q;state.page='empresas';state.selectedCompany=null;history.pushState({},'','/');render()}}}
   const drop=$('#userDropdown'),btn=$('#userMenuBtn');if(btn&&drop){btn.onclick=e=>{e.stopPropagation();drop.hidden=!drop.hidden;btn.setAttribute('aria-expanded',drop.hidden?'false':'true')};document.addEventListener('click',()=>{drop.hidden=true},{once:true})}
@@ -159,12 +309,260 @@ function head(title,desc,actions='',helpKey){return `<div class="page-head"><div
 function bindCompanyPicker(){const input=$('#companyPickerSearch'),hidden=$('#pickedCompanyId'),box=$('#companyPickerResults');if(!input||!hidden)return;const glob=$('#pickerGlobal');if(glob)glob.onchange=()=>{if(glob.checked){hidden.value='';hidden.removeAttribute('required');input.disabled=true;if(box)box.innerHTML='';state.pickedCompany=null}else{hidden.setAttribute('required','required');input.disabled=false}};const run=async()=>{const q=input.value.trim(),n=++pickerSeq;if(q.length<2){if(box)box.innerHTML='<div class="muted">Digite ao menos 2 caracteres.</div>';return}if(box)box.innerHTML='<div class="muted">Buscando...</div>';try{const data=await api('/empresas?page=1&page_size=15&status=ACTIVE&q='+encodeURIComponent(q));if(n!==pickerSeq)return;const items=listItems(data);if(!items.length){if(box)box.innerHTML='<div class="muted">Nenhuma empresa encontrada.</div>';return}if(box){box.innerHTML=items.map(x=>`<button type="button" class="picker-item" data-id="${esc(x.id)}"><span>${esc(x.trade_name||x.name)}</span><small>${esc(formatCnpj(x.cnpj)||x.cnpj||'')}</small></button>`).join('');box.querySelectorAll('.picker-item').forEach(btn=>{btn.onclick=()=>{const x=items.find(i=>i.id===btn.dataset.id);if(!x)return;state.pickedCompany=x;hidden.value=x.id;input.value=x.trade_name||x.name;box.innerHTML=''}})}}catch(e){if(n!==pickerSeq)return;if(box)box.innerHTML=`<div class="muted">${esc(e.message)}</div>`}};input.oninput=debounce(run,350)}function accountOptions(){return state.accounts.filter(a=>a.is_postable).map(a=>`<option value="${a.id}">${esc(a.account_code)} — ${esc(a.description)}</option>`).join('')}function badge(s){const m={PENDING:['pending','Aguardando aprovação'],PENDING_APPROVAL:['pending','Aguardando aprovação'],NEEDS_CLASSIFICATION:['need','Aguardando classificação'],POSTED:['approved','Lançado'],REJECTED:['rejected','Rejeitado']};const x=m[s]||['pending',originLabel(s)];return `<span class="badge ${x[0]}">${x[1]}</span>`}
 function txBadge(s){const v=String(s||'');if(['POSTED','ACCOUNTED'].includes(v))return '<span class="badge approved">Aprovada</span>';if(v==='REJECTED')return '<span class="badge rejected">Reprovada</span>';return '<span class="badge pending">Pendente</span>'}
 async function page(){const c=$('#content');if(state.page==='dashboard')return dashboard(c);if(state.page==='empresas')return crudCompanies(c);if(state.page==='despesas'||state.page==='receitas')return transactions(c,state.page);if(state.page==='lancamentos')return entries(c);if(state.page==='aprovacao')return approval(c);if(state.page==='pendencias')return pendenciesPage(c);if(state.page==='classificacao')return classificationPage(c);if(state.page==='plano')return plan(c);if(state.page==='categorias')return simple(c,'Categorias','categorias');if(state.page==='bancos')return simple(c,'Bancos','bancos');if(state.page==='regras')return rules(c);if(state.page==='documentos')return documents(c);if(state.page==='solicitacoes')return requests(c);if(state.page==='processos')return processesPage(c);if(state.page==='exportacoes')return exportsPage(c);if(state.page==='integracoes')return dominioIntegrationsPage(c);if(state.page==='importacoes')return importsPage(c);if(state.page==='usuarios')return state.selectedCompany?companyUsersPage(c,state.selectedCompany.id):users(c);if(state.page==='comunicacoes')return commsPage(c);if(state.page==='ia')return aiSettingsPage(c);if(state.page==='configuracoes')return settingsPage(c);if(state.page==='auditoria')return auditPage(c)}
-async function dashboard(c){c.innerHTML=skeletonPage();const d=await api('/dashboard');const ctx=state.selectedCompany;if(ctx){const op=await api('/empresas/'+ctx.id+'/operacional').catch(()=>({activity:[],origins:[],imports:[]}));c.innerHTML=head(esc(ctx.trade_name||ctx.name),'Visão operacional desta empresa. As telas usam automaticamente a empresa ativa.')+`<div class="grid cards"><div class="card kpi-card"><div class="label">Despesas</div><div class="value">${op.expenses??d.expense_count??0}</div></div><div class="card kpi-card"><div class="label">Documentos</div><div class="value">${d.documents||0}</div></div><div class="card kpi-card"><div class="label">Pendências</div><div class="value">${op.pendencies??0}</div></div><div class="card kpi-card"><div class="label">Solicitações</div><div class="value">${op.requests??0}</div></div><div class="card kpi-card"><div class="label">Classificações</div><div class="value">${op.classifications??0}</div></div><div class="card kpi-card"><div class="label">Aprovações</div><div class="value">${op.approvals??0}</div></div></div><div class="grid" style="grid-template-columns:1.4fr 1fr;margin-top:16px"><div class="panel"><h3>Atividade recente</h3>${(op.activity||[]).map(x=>`<div class="activity-item"><b>${esc(({EXPENSE_CREATED:'Nova despesa enviada pelo cliente',DOCUMENT_UPLOADED:'Novo documento recebido',IMPORT_COMPLETED:'Importação concluída',IMPORT_CREATED:'Importação registrada',REVENUE_CREATED:'Receita recebida por importação ou integração'}[x.event_type]||x.event_type))}</b><div class="muted">${esc(x.payload&&(x.payload.description||x.payload.original_name)||'')}</div><small>${esc(timeAgo(x.created_at))}</small></div>`).join('')||emptyState('Sem atividade recente','Os eventos desta empresa aparecerão aqui.')}</div><div class="panel"><h3>Movimentações por origem</h3>${originBars(op.origins||[])}<p class="muted" style="margin-top:12px">CDS Sistemas não é obrigatório. ${Number(op.company&&op.company.cds_systems_enabled)?'Origem disponível quando houver dados.':'Esta empresa opera sem integração CDS Sistemas.'}</p></div></div>`;return}
-const [recentCompanies,notifs]=await Promise.all([api('/empresas?page=1&page_size=8').catch(e=>{if(e&&e.status===401)throw e;return{items:[]}}),loadNotifications().catch(e=>{if(e&&e.status===401)throw e;return{items:[],_error:e.message||'Não foi possível carregar agora.'}})]);
-const ativas=d.active_companies||d.companies||0;const total=d.total_companies||d.companies||0;const pend=d.companies_with_pendencies||0;const inativas=Math.max(0,total-ativas);
-const next=[];if(d.expenses_awaiting_classification)next.push(['classificacao','Revisar classificações pendentes',d.expenses_awaiting_classification]);if(d.entries_awaiting_approval||d.pending)next.push(['aprovacao','Aprovar classificações',d.entries_awaiting_approval||d.pending]);if(d.entries_posted)next.push(['exportacoes','Gerar/exportar lançamentos',d.entries_posted]);
-c.innerHTML=`<div class="dash-hero"><div><p class="eyebrow">Painel</p><h1>${greetUser()}</h1><p>Aqui está o panorama da sua carteira de empresas.</p></div>${officeIdentityHtml()}</div><div class="grid cards"><div class="card kpi-card"><div class="label">Classificação</div><div class="value">${d.expenses_awaiting_classification||0}</div></div><div class="card kpi-card"><div class="label">Aprovação</div><div class="value">${d.entries_awaiting_approval||0}</div></div><div class="card kpi-card"><div class="label">Lançamentos efetivados</div><div class="value">${d.entries_posted||d.approved||0}</div></div><div class="card kpi-card"><div class="label">Exportação</div><div class="value">${d.entries_export_ready||d.entries_posted||d.approved||0}</div></div></div><div class="grid" style="grid-template-columns:1.3fr 1fr;margin-top:16px"><div class="panel"><h3>Atividade recente</h3>${notifs._error?emptyState('Não foi possível carregar agora.',esc(notifs._error),'<button type="button" class="btn secondary" id="retryActivity">Tentar novamente</button>'):((notifs.items||[]).slice(0,8).map(n=>`<div class="activity-item"><b>${esc(n.title)}</b><div class="muted">${esc(n.message)}</div>${n.context?`<small>${esc(n.context)}</small>`:''}<small>${esc(timeAgo(n.created_at))}</small></div>`).join('')||emptyState('Nenhuma atividade recente','Quando houver eventos da carteira, eles aparecerão aqui.'))}</div><div class="panel"><h3>Movimentações por origem</h3>${originBars(d.origins||[])}</div></div><div class="grid" style="grid-template-columns:1fr 1fr;margin-top:16px"><div class="panel"><h3>Situação da carteira</h3>${donutHtml([{label:'Ativas',value:ativas,color:'#1b7a4a',cls:'status-active'},{label:'Com pendências',value:pend,color:'#b7791f',cls:'status-pending'},{label:'Inativas',value:inativas,color:'#8a9aa0',cls:'status-inactive'}])}</div><div class="panel"><h3>Próximas ações</h3>${next.length?`<div class="action-list">${next.map(([p,l,n])=>`<button type="button" data-page="${p}"><span>${esc(l)}</span><b>${n}</b></button>`).join('')}</div>`:emptyState('Tudo em dia','Não há ações pendentes com os dados atuais.')}<div class="panel" style="margin-top:16px;padding:0;border:0;box-shadow:none"><h3>Evolução da carteira</h3>${emptyState('Histórico indisponível','Ainda não há série temporal dos últimos 6 meses neste ambiente.')}</div></div></div><div class="panel table-wrap"><h3 style="padding:16px 16px 0">Últimas empresas com atividade</h3><table class="table"><thead><tr><th>Empresa</th><th>Última atividade</th><th>Pendências</th><th>Situação</th><th></th></tr></thead><tbody>${(recentCompanies.items||[]).map(x=>`<tr><td data-label="Empresa">${esc(x.trade_name||x.name)}</td><td data-label="Última atividade">${esc(x.last_activity_at?timeAgo(x.last_activity_at):'sem registro')}</td><td data-label="Pendências">${x.pending_count??0}</td><td data-label="Situação">${companyStatusBadge(x.status)}</td><td><button class="btn secondary" onclick="enterCompany('${x.id}')">Acessar empresa</button></td></tr>`).join('')||`<tr><td colspan="5">${emptyState('Nenhuma empresa','Cadastre a primeira empresa da carteira.')}</td></tr>`}</tbody></table></div>`;
-document.querySelectorAll('.action-list [data-page]').forEach(b=>b.onclick=()=>{state.page=b.dataset.page;render()});$('#retryActivity')&&($('#retryActivity').onclick=()=>dashboard(c));
+function opsPeriodSelectHtml(){
+  const cur=state.dashPreset||'month';
+  const opts=[['today','Hoje'],['7d','Últimos 7 dias'],['30d','Últimos 30 dias'],['month','Mês atual'],['previous_month','Mês anterior'],['custom','Personalizado']];
+  return `<label class="ops-period"><span class="sr-only">Período</span><select id="dashPeriod" aria-label="Período">${opts.map(([v,l])=>`<option value="${v}" ${cur===v?'selected':''}>${l}</option>`).join('')}</select></label>`;
+}
+function scheduleDashRefresh(){
+  clearTimeout(window.__cdsDashRt);
+  window.__cdsDashRt=setTimeout(()=>{if(typeof window.__cdsRefreshDashboard==='function')window.__cdsRefreshDashboard()},500);
+}
+function bindDashPeriod(){
+  const sel=$('#dashPeriod');
+  if(!sel)return;
+  sel.onchange=()=>{
+    state.dashPreset=sel.value;
+    if(sel.value==='custom'){
+      const from=state.dashFrom||new Date().toISOString().slice(0,10);
+      const to=state.dashTo||from;
+      const nextFrom=window.prompt('Data inicial (AAAA-MM-DD)',from);
+      const nextTo=window.prompt('Data final (AAAA-MM-DD)',to);
+      if(nextFrom&&/^\d{4}-\d{2}-\d{2}$/.test(nextFrom))state.dashFrom=nextFrom;
+      if(nextTo&&/^\d{4}-\d{2}-\d{2}$/.test(nextTo))state.dashTo=nextTo;
+    }
+    const box=$('#content');
+    if(box)dashboard(box);
+  };
+}
+function dashQuery(){
+  const preset=state.dashPreset||'month';
+  const act=state.dashActivity||'7d';
+  let q=`/dashboard?preset=${encodeURIComponent(preset)}&activity=${encodeURIComponent(act)}`;
+  if(preset==='custom'&&state.dashFrom&&state.dashTo)q+=`&from=${encodeURIComponent(state.dashFrom)}&to=${encodeURIComponent(state.dashTo)}`;
+  return q;
+}
+function dashSkeleton(){
+  const sk=n=>Array.from({length:n},()=>'<div class="sk-card"></div>').join('');
+  return `<div class="ops-dash" aria-busy="true"><div class="sk-row" style="width:40%"></div><div class="ops-kpis">${sk(5)}</div><div class="sk-card" style="height:220px;margin-top:16px"></div><div class="ops-split">${sk(2)}</div><div class="ops-split">${sk(2)}</div></div>`;
+}
+function opsBlockError(id,title,msg){
+  return `<div class="panel ops-block" id="${id}"><h3>${title}</h3>${emptyState(title,esc(msg||'Não foi possível carregar.'),'<button type="button" class="btn secondary ops-retry" id="retryActivity" data-retry="'+id+'">Tentar novamente</button>')}</div>`;
+}
+function periodCaption(summary){
+  if(!summary||!summary.from)return '';
+  const [y,m]=String(summary.from).split('-');
+  const months=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const idx=Number(m)-1;
+  if(state.dashPreset==='month'&&months[idx])return `${months[idx]} ${y}`;
+  return `${summary.from} — ${summary.to}`;
+}
+function opsKpiHtml(key,label,kpi){
+  kpi=kpi||{};
+  const page=kpi.page||'';
+  const ico={companies:'building',documents:'file',pendencies:'check',requests:'message',processes:'book'}[key]||'file';
+  return `<button type="button" class="card kpi-card ops-kpi kpi-link ops-kpi-${esc(key)}" data-page="${esc(page)}" aria-label="Abrir ${label}"><span class="ops-kpi-ico" aria-hidden="true">${icon(ico)}</span><div class="ops-kpi-copy"><div class="label">${label}</div><div class="value">${kpi.value??0}</div><div class="ops-kpi-hint">${esc(kpi.hint||'—')}</div></div></button>`;
+}
+function formatChartBucket(bucket){
+  const s=String(bucket||'');
+  if(/\d{2}:00$/.test(s))return s.slice(-5,-3)+'h';
+  if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(8,10)+'/'+s.slice(5,7);
+  return s;
+}
+function opsChartSvg(series){
+  series=Array.isArray(series)?series:[];
+  if(!series.length)return emptyState('Nenhuma atividade registrada no período.','Os eventos do escritório aparecerão neste gráfico.');
+  const w=720,h=248,l=40,r=12,t=14,b=32;
+  const keys=[['documents','Documentos','ops-line-documents'],['expenses','Despesas','ops-line-expenses'],['revenues','Receitas','ops-line-revenues'],['requests','Solicitações','ops-line-requests'],['classifications','Classificações','ops-line-class']];
+  const max=Math.max(1,...series.flatMap(p=>keys.map(([k])=>Number(p[k]||0))));
+  const n=Math.max(1,series.length-1);
+  const xy=(i,k)=>{
+    const x=l+(i*(w-l-r))/n;
+    const y=t+((h-t-b)*(1-Number(series[i][k]||0)/max));
+    return [x,y];
+  };
+  const pathFor=k=>series.map((_,i)=>{const [x,y]=xy(i,k);return `${i?'L':'M'}${x.toFixed(1)},${y.toFixed(1)}`;}).join(' ');
+  const area=(()=>{
+    const d=pathFor('documents');
+    const last=xy(series.length-1,'documents');
+    const first=xy(0,'documents');
+    return `${d} L${last[0].toFixed(1)},${(h-b).toFixed(1)} L${first[0].toFixed(1)},${(h-b).toFixed(1)} Z`;
+  })();
+  const grid=[0,.25,.5,.75,1].map(f=>{
+    const y=t+(h-t-b)*(1-f);
+    return `<line class="ops-grid" x1="${l}" x2="${w-r}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}"/><text class="ops-axis" x="${l-6}" y="${(y+3).toFixed(1)}">${Math.round(max*f)}</text>`;
+  }).join('');
+  const step=series.length>12?Math.ceil(series.length/8):1;
+  const xlabels=series.map((p,i)=>{
+    if(i%step&&i!==series.length-1)return '';
+    const [x]=xy(i,'documents');
+    return `<text class="ops-axis ops-axis-x" x="${x.toFixed(1)}" y="${h-8}">${esc(formatChartBucket(p.bucket))}</text>`;
+  }).join('');
+  const lines=keys.map(([k,label,cls])=>`<path class="${cls}" d="${pathFor(k)}" fill="none" stroke-width="2.2" aria-label="${label}"/>`).join('');
+  const summary=`Série com ${series.length} pontos. Máximo ${max}.`;
+  return `<div class="ops-chart-wrap"><div class="ops-tip" id="opsChartTip" hidden></div><svg class="ops-chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Atividade do escritório. ${esc(summary)}">${grid}${xlabels}<path class="ops-area-documents" d="${area}"/>${lines}</svg><ul class="ops-legend">${keys.map(([,label,cls])=>`<li><i class="${cls}"></i>${label}</li>`).join('')}</ul></div>`;
+}
+function bindOpsChart(root,series){
+  const svg=root.querySelector('.ops-chart');
+  const tip=root.querySelector('#opsChartTip');
+  if(!svg||!tip||!series||!series.length)return;
+  const keys=[['documents','Documentos'],['expenses','Despesas'],['revenues','Receitas'],['requests','Solicitações'],['classifications','Classificações']];
+  svg.onmousemove=e=>{
+    const rect=svg.getBoundingClientRect();
+    const i=Math.round(((e.clientX-rect.left)/Math.max(1,rect.width))*(series.length-1));
+    const p=series[Math.max(0,Math.min(series.length-1,i))];
+    if(!p)return;
+    tip.hidden=false;
+    tip.style.left=Math.min(rect.width-200,Math.max(8,e.clientX-rect.left+8))+'px';
+    tip.style.top=Math.max(8,e.clientY-rect.top-12)+'px';
+    tip.innerHTML=`<b>${esc(formatChartBucket(p.bucket))}</b>`+keys.map(([k,l])=>`<div>${l}: ${Number(p[k]||0)}</div>`).join('');
+  };
+  svg.onmouseleave=()=>{tip.hidden=true};
+}
+function opsHealthHtml(health){
+  health=health||{};
+  const ok=Number(health.companies_ok||0);
+  const pend=Number(health.companies_with_pendencies||0);
+  const total=ok+pend;
+  const pct=n=>total?Math.round((n/total)*100)+'%':'';
+  let donut='';
+  if(total){
+    const circ=2*Math.PI*36;
+    let acc=0;
+    const slice=(value,color)=>{
+      if(!value)return '';
+      const frac=value/total;
+      const len=circ*frac;
+      const rot=(acc/total)*360-90;
+      acc+=value;
+      return `<circle cx="50" cy="50" r="36" fill="none" stroke="${color}" stroke-width="12" stroke-dasharray="${len} ${circ-len}" transform="rotate(${rot} 50 50)"/>`;
+    };
+    donut=`<div class="ops-health-viz"><div class="ops-donut"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="36" fill="none" stroke="var(--color-border)" stroke-width="12"/>${slice(ok,'var(--color-success)')}${slice(pend,'var(--color-warning)')}</svg><div class="ops-donut-center"><b>${total}</b><small>Empresas</small></div></div><ul class="ops-health-legend"><li><i class="ops-dot ops-dot-ok"></i> Em dia <b>${ok}</b> <span>${pct(ok)}</span></li><li><i class="ops-dot ops-dot-warn"></i> Com pendências <b>${pend}</b> <span>${pct(pend)}</span></li></ul></div>`;
+  }else donut=emptyState('Tudo em dia.','Nenhuma empresa da carteira precisa de atenção agora.');
+  const rows=[
+    ['ok','empresas',`${ok} empresas em dia`],
+    ['warn','pendencias',`${pend} empresas com pendências`],
+    ['bad','processos',`${health.processes_overdue||0} processos atrasados`],
+    ['warn','processos',`${health.processes_due_soon||0} processos vencendo`],
+    ['bad','classificacao',`${health.documents_attention||0} documentos aguardando atenção`]
+  ];
+  const alert=pend?`<div class="ops-health-alert"><p><b>${pend} empresas precisam de atenção</b><br><span class="muted">Existem pendências que podem impactar prazos e obrigações.</span></p><button type="button" class="btn secondary ops-health-item" data-page="pendencias">Ver pendências</button></div>`:'';
+  return `${donut}<ul class="ops-health">${rows.map(([tone,page,label])=>`<li><button type="button" class="ops-health-item" data-page="${page}"><span class="ops-dot ops-dot-${tone}" aria-hidden="true"></span><span>${esc(label)}</span></button></li>`).join('')}</ul>${alert}`;
+}
+function activityIconName(n){
+  const t=n.type||n.event_type||'';
+  if(/DOCUMENT/.test(t))return 'file';
+  if(/EXPENSE/.test(t))return 'arrowDown';
+  if(/REVENUE/.test(t))return 'arrowUp';
+  if(/REQUEST/.test(t))return 'message';
+  if(/CLASS/.test(t))return 'check';
+  return 'bell';
+}
+function deadlineStatusLabel(item){
+  const st=item.status||'NO_PRAZO';
+  if(st==='ATRASADO'||st==='ATRASADA')return 'Atrasado';
+  const days=Number(item.days);
+  if(Number.isFinite(days)&&days===0)return 'Vence hoje';
+  if(Number.isFinite(days)&&days>0)return `Em ${days} dia${days===1?'':'s'}`;
+  if(st==='VENCENDO')return 'Vencendo';
+  return 'No prazo';
+}
+function monthShort(iso){
+  const m=['JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DEZ'];
+  const d=String(iso||'').slice(5,7);
+  return m[Number(d)-1]||'';
+}
+function activityHref(n){
+  if(n.occurrence_id||n.entity_type==='process_occurrence')return 'processos';
+  const t=n.type||n.event_type||'';
+  if(/DOCUMENT/.test(t))return 'documentos';
+  if(/EXPENSE|CLASSIFICATION/.test(t))return 'classificacao';
+  if(/REVENUE|ENTRY|APPROV/.test(t))return 'aprovacao';
+  if(/REQUEST/.test(t))return 'solicitacoes';
+  if(/PENDENCY/.test(t))return 'pendencias';
+  return 'dashboard';
+}
+async function dashboard(c){
+  c.innerHTML=dashSkeleton();
+  const ctx=state.selectedCompany;
+  if(ctx){
+    try{
+      const d=await api(dashQuery());
+      const op=await api('/empresas/'+ctx.id+'/operacional').catch(()=>({activity:[],origins:[],imports:[]}));
+      const kpi=([page,label,value])=>`<button type="button" class="card kpi-card kpi-link" data-page="${page}" aria-label="Abrir ${label}"><div class="label">${label}</div><div class="value">${value}</div></button>`;
+      c.innerHTML=head(esc(ctx.trade_name||ctx.name),'Visão operacional desta empresa. As telas usam automaticamente a empresa ativa.')+`<div class="grid cards">${kpi(['despesas','Despesas',op.expenses??d.expense_count??0])}${kpi(['documentos','Documentos',d.documents||0])}${kpi(['pendencias','Pendências',op.pendencies??0])}${kpi(['solicitacoes','Solicitações',op.requests??0])}${kpi(['classificacao','Classificações',op.classifications??0])}${kpi(['aprovacao','Aprovações',op.approvals??0])}</div><div class="grid ops-split"><div class="panel"><h3>Atividade recente</h3>${(op.activity||[]).map(x=>`<div class="activity-item"><b>${esc(({EXPENSE_CREATED:'Nova despesa enviada pelo cliente',DOCUMENT_UPLOADED:'Novo documento recebido',IMPORT_COMPLETED:'Importação concluída',IMPORT_CREATED:'Importação registrada',REVENUE_CREATED:'Receita recebida por importação ou integração'}[x.event_type]||x.event_type))}</b><div class="muted">${esc(x.payload&&(x.payload.description||x.payload.original_name)||'')}</div><small>${esc(timeAgo(x.created_at))}</small></div>`).join('')||emptyState('Sem atividade recente','Os eventos desta empresa aparecerão aqui.')}</div><div class="panel"><h3>Movimentações por origem</h3>${originBars(op.origins||[])}</div></div>`;
+      c.querySelectorAll('.kpi-link[data-page]').forEach(btn=>{btn.onclick=()=>{state.page=btn.dataset.page;render()}});
+      return;
+    }catch(err){
+      if(err&&err.status===401)throw err;
+      c.innerHTML=emptyState('Não foi possível carregar',esc(err.message),'<button type="button" class="btn" id="retryDash">Tentar novamente</button>');
+      $('#retryDash')&&($('#retryDash').onclick=()=>dashboard(c));
+      return;
+    }
+  }
+  const seq=(state.dashSeq=(state.dashSeq||0)+1);
+  const [dashRes, procRes, dueRes, notifRes]=await Promise.allSettled([
+    api(dashQuery()),
+    api('/processos/dashboard'),
+    api('/processos/dashboard/proximos-prazos?limit=8'),
+    loadNotifications().catch(e=>{if(e&&e.status===401)throw e;return{_error:e.message||'Não foi possível carregar agora.',items:[]}})
+  ]);
+  if(seq!==state.dashSeq)return;
+  const d=dashRes.status==='fulfilled'?dashRes.value:null;
+  const dashErr=dashRes.status==='rejected'?dashRes.reason:null;
+  if(dashErr&&dashErr.status===401)throw dashErr;
+  if(!d){
+    c.innerHTML=emptyState('Não foi possível carregar o dashboard',esc(dashErr&&dashErr.message||'Tente novamente.'),'<button type="button" class="btn" id="retryDash">Tentar novamente</button>');
+    $('#retryDash')&&($('#retryDash').onclick=()=>dashboard(c));
+    return;
+  }
+  const proc=procRes.status==='fulfilled'?procRes.value:{};
+  const dues=dueRes.status==='fulfilled'?(dueRes.value.items||[]):[];
+  const dueErr=dueRes.status==='rejected'?dueRes.reason:null;
+  const notifs=notifRes.status==='fulfilled'?notifRes.value:{items:[],_error:'Não foi possível carregar agora.'};
+  const k=d.kpis||{};
+  const sum=d.summary||{};
+  const health=d.health||{};
+  const rate=sum.processing_rate;
+  const rateHtml=rate==null?'':`<div class="ops-rate"><div class="ops-rate-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${rate}" aria-label="Taxa de processamento ${rate}%"><i style="width:${rate}%"></i></div><div class="ops-rate-meta"><b>${rate}%</b><span>Taxa de processamento</span></div></div>`;
+  const chartHtml=opsChartSvg(d.activity_series||[]);
+  const actRange=state.dashActivity||'7d';
+  const actCaption=actRange==='24h'?'Movimentação nas últimas 24 horas em tempo real.':actRange==='30d'?'Movimentação nos últimos 30 dias.':'Movimentações recentes';
+  const actItems=(notifs.items||[]).slice(0,8);
+  c.innerHTML=`<div class="ops-dash">
+    <div class="ops-kpis">${opsKpiHtml('companies','Empresas',k.companies)}${opsKpiHtml('documents','Documentos',k.documents)}${opsKpiHtml('pendencies','Pendências',k.pendencies)}${opsKpiHtml('requests','Solicitações',k.requests)}${opsKpiHtml('processes','Processos',k.processes)}</div>
+    <section class="panel ops-summary"><div class="ops-summary-head"><div><h3>Resumo Contábil do Período</h3><p class="muted">Visão consolidada da movimentação contábil no período selecionado.</p></div><span class="muted">${esc(periodCaption(sum))}</span></div>
+      <div class="ops-summary-tiles">
+        <div class="ops-tile ops-tile-docs"><span class="ops-kpi-ico" aria-hidden="true">${icon('file')}</span><span>Documentos recebidos</span><b>${sum.documents_received||0}</b></div>
+        <div class="ops-tile ops-tile-ok"><span class="ops-kpi-ico" aria-hidden="true">${icon('check')}</span><span>Classificados</span><b>${sum.documents_processed||0}</b></div>
+        <div class="ops-tile ops-tile-warn"><span class="ops-kpi-ico" aria-hidden="true">${icon('tag')}</span><span>Pendentes</span><b>${sum.documents_pending||0}</b></div>
+        <div class="ops-tile ops-tile-exp"><span class="ops-kpi-ico" aria-hidden="true">${icon('arrowDown')}</span><span>Despesas</span><b>${money(sum.expenses_cents||0)}</b></div>
+        <div class="ops-tile ops-tile-rev"><span class="ops-kpi-ico" aria-hidden="true">${icon('arrowUp')}</span><span>Receitas</span><b>${money(sum.revenue_cents||0)}</b></div>
+      </div>
+      <div class="ops-summary-extra muted"><span>Aprovações pendentes <b>${sum.approvals_pending||0}</b></span><span>Lançamentos efetivados <b>${sum.entries_posted||0}</b></span><span>Processos ${proc.pendentes||0} pendentes · ${proc.em_andamento||0} em andamento</span></div>
+      ${rateHtml}</section>
+    <div class="ops-split">
+      <section class="panel ops-chart-panel" id="opsChartBlock"><div class="ops-summary-head"><div><h3>Atividade do Escritório</h3><p class="muted">${esc(actCaption)}</p></div><div class="row-actions ops-range">${[['24h','Últimas 24 horas'],['7d','Últimos 7 dias'],['30d','Últimos 30 dias']].map(([v,l])=>`<button type="button" class="btn ${actRange===v?'':'secondary'} ops-act" data-act="${v}" aria-pressed="${actRange===v?'true':'false'}">${l}</button>`).join('')}</div></div>${chartHtml}<p class="sr-only">O gráfico mostra documentos, despesas, receitas, solicitações e classificações no intervalo selecionado. ${esc(actCaption)}</p></section>
+      <section class="panel" id="opsHealthBlock"><div class="ops-summary-head"><div><h3>Saúde Contábil do Escritório</h3><p class="muted">Situação atual das empresas sob sua gestão.</p></div></div>${opsHealthHtml(health)}</section>
+    </div>
+    <div class="ops-split">
+      ${dueErr?opsBlockError('opsDeadlines','Próximos Prazos',dueErr.message):`<section class="panel" id="opsDeadlines"><div class="ops-summary-head"><h3>Próximos Prazos</h3><button type="button" class="btn secondary" id="opsDeadlinesAll">Ver todos</button></div>${dues.length?`<ul class="ops-deadlines">${dues.map(item=>`<li><button type="button" class="ops-deadline" data-page="processos"><span class="ops-deadline-date"><b>${esc(String(item.due_date||'').slice(8,10))}</b><small>${esc(monthShort(item.due_date))}</small></span><span class="ops-deadline-body"><b>${esc(item.type_label||item.step_name||'Prazo')}</b><small>${esc(item.company_name||'—')}</small></span><span class="ops-deadline-st">${esc(deadlineStatusLabel(item))}</span></button></li>`).join('')}</ul>`:emptyState('Não há próximos prazos.','Quando houver obrigações no Motor de Processos, elas aparecerão aqui.')}</section>`}
+      ${notifs._error?opsBlockError('opsActivity','Últimas atividades',notifs._error):`<section class="panel" id="opsActivity"><div class="ops-summary-head"><h3>Últimas Atividades</h3><button type="button" class="btn secondary" id="opsActivityAll">Ver todas</button></div>${actItems.length?actItems.map(n=>`<button type="button" class="activity-item ops-activity" data-nid="${esc(n.id)}" data-page="${activityHref(n)}" data-company="${esc(n.company_id||'')}"><span class="ops-act-ico" aria-hidden="true">${icon(activityIconName(n))}</span><span><b>${esc(n.title)}</b><div class="muted">${esc(n.company_name||n.context||n.message||'')}</div><small>${esc(timeAgo(n.created_at))}</small></span></button>`).join('') : emptyState('Nenhuma atividade registrada no período.','Quando houver eventos da carteira, eles aparecerão aqui.')}</section>`}
+    </div>
+  </div>`;
+  c.querySelectorAll('.kpi-link[data-page], .ops-health-item[data-page], .ops-deadline[data-page]').forEach(btn=>{btn.onclick=()=>{state.page=btn.dataset.page;render()}});
+  $('#opsDeadlinesAll')&&($('#opsDeadlinesAll').onclick=()=>{state.page='processos';render()});
+  $('#opsActivityAll')&&($('#opsActivityAll').onclick=()=>{const p=$('#notifPanel');if(p){p.hidden=false;if(typeof drawNotifList==='function')drawNotifList()}});
+  c.querySelectorAll('.ops-act').forEach(btn=>btn.onclick=()=>{state.dashActivity=btn.dataset.act;dashboard(c)});
+  c.querySelectorAll('.ops-retry').forEach(btn=>btn.onclick=()=>dashboard(c));
+  c.querySelectorAll('.ops-activity').forEach(btn=>btn.onclick=()=>{
+    const page=btn.dataset.page||'dashboard';
+    const company=btn.dataset.company;
+    if(company)enterCompany(company,page);
+    else{state.page=page;render()}
+  });
+  bindOpsChart(c,d.activity_series||[]);
+  window.__cdsRefreshDashboard=()=>{if(state.page==='dashboard'){const box=$('#content');if(box)dashboard(box)}};
 }
 async function crudCompanies(c){if(state.companyUsers)return companyUsersPage(c,state.companyUsers);if(state.companyView)return companyViewPage(c,state.companyView);const q=state.companySearch||'';const status=state.companyStatus||'';const page=state.companyPage||1;state.companyListSeq=(state.companyListSeq||0)+1;const seq=state.companyListSeq;const data=await api('/empresas?page='+page+'&page_size=25'+ (q?'&q='+encodeURIComponent(q):'')+(status?'&status='+encodeURIComponent(status):''));if(seq!==state.companyListSeq)return;const list=data.items||[];c.innerHTML=head('Empresas','Gerencie a carteira de empresas do escritório.','<button class="btn" id="new">+ Nova empresa</button>')+`<div class="panel" style="margin-bottom:14px"><input id="companySearch" placeholder="Pesquisar empresa ou CNPJ..." value="${esc(q)}" style="width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px"><div class="row-actions">${[['','Todas'],['ACTIVE','Ativas'],['BLOCKED','Bloqueadas'],['ARCHIVED','Arquivadas']].map(([v,l])=>`<button type="button" class="btn ${status===v?'':'secondary'}" data-status="${v}">${l}</button>`).join('')}</div></div><div class="panel table-wrap"><table class="table"><thead><tr><th>Empresa</th><th>CNPJ</th><th>Situação</th><th>Última atividade</th><th>Pendências</th><th>Ações</th></tr></thead><tbody>${list.map(x=>`<tr><td data-label="Empresa"><b>${esc(x.trade_name||x.name)}</b><div class="muted">${esc(x.name)}</div>${x.assignee_names?`<div class="muted">Equipe: ${esc(x.assignee_names)}</div>`:''}</td><td data-label="CNPJ">${esc(formatCnpj(x.cnpj)||'-')}</td><td data-label="Situação">${companyStatusBadge(x.status)}</td><td data-label="Última atividade">${esc(x.last_activity_at?timeAgo(x.last_activity_at):'sem registro')}</td><td data-label="Pendências">${x.pending_count??0}</td><td data-label="Ações"><div class="row-actions">${x.status==='ARCHIVED'?`<button class="btn secondary" onclick="viewCompany('${x.id}')">Cadastro</button>`:`<button class="btn" onclick="enterCompany('${x.id}')">Acessar empresa</button>`}<div class="more-wrap"><button type="button" class="icon-button more-btn" aria-label="Mais ações">⋮</button><div class="more-menu" hidden><button type="button" onclick="viewCompany('${x.id}')">Cadastro</button><button type="button" onclick="editCompany('${x.id}')">Editar</button><button type="button" onclick="openCompanyUsers('${x.id}')">Usuários</button>${Number(state.tenant&&state.tenant.assign_staff_companies)&&(state.user.role==='OWNER'||state.user.role==='ACCOUNTANT')?`<button type="button" onclick="assignCompanyStaff('${x.id}')">Designar equipe</button>`:''}${x.status==='ARCHIVED'?((state.user.role==='OWNER'||state.user.role==='ACCOUNTANT')?`<button type="button" class="ok" onclick="restoreCompany('${x.id}')">Restaurar</button>`:''):`<button type="button" class="${x.status==='BLOCKED'?'ok':'danger'}" onclick="toggleCompany('${x.id}','${x.status}')">${x.status==='BLOCKED'?'Desbloquear':'Bloquear'}</button>${(state.user.role==='OWNER'||state.user.role==='ACCOUNTANT')?`<button type="button" onclick="archiveCompany('${x.id}')">Arquivar</button>`:''}`}${(state.user.role==='OWNER'||state.user.role==='ACCOUNTANT')?`<button type="button" class="danger" onclick="deleteCompany('${x.id}')">Excluir</button>`:''}</div></div></div></td></tr>`).join('')||`<tr><td colspan="6">${emptyState('Nenhuma empresa encontrada.','Não encontramos empresas com os filtros atuais.','<button type="button" class="btn secondary" id="clearCompanyFilters">Limpar filtros</button>')}</td></tr>`}</tbody></table></div><div class="panel" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px"><span>${data.from||0}–${data.to||0} de ${data.total||0} empresas</span><div class="row-actions"><button class="btn secondary" id="prevPage" ${page<=1?'disabled':''}>Anterior</button><span>Página ${data.page||1} de ${data.pages||1}</span><button class="btn secondary" id="nextPage" ${page>=(data.pages||1)?'disabled':''}>Próxima</button></div></div>`;$('#new').onclick=()=>companyWizard();bindMoreMenus(c);document.querySelectorAll('[data-status]').forEach(b=>b.onclick=()=>{state.companyStatus=b.dataset.status;state.companyPage=1;crudCompanies(c)});const search=$('#companySearch');search.onkeydown=e=>{if(e.key==='Enter'){state.companySearch=search.value.trim();state.companyPage=1;crudCompanies(c)}};search.oninput=debounce(()=>{state.companySearch=search.value.trim();state.companyPage=1;crudCompanies(c)},350);$('#prevPage').onclick=()=>{state.companyPage=Math.max(1,page-1);crudCompanies(c)};$('#nextPage').onclick=()=>{state.companyPage=page+1;crudCompanies(c)};$('#clearCompanyFilters')&&($('#clearCompanyFilters').onclick=()=>{state.companySearch='';state.companyStatus='';state.companyPage=1;crudCompanies(c)});window.viewCompany=id=>{state.companyView=id;state.companyUsers=null;crudCompanies(c)};window.editCompany=async id=>{const x=list.find(i=>i.id===id)||await api('/empresas/'+id);companyWizard(x)};window.openCompanyUsers=id=>enterCompany(id,'usuarios');window.toggleCompany=async(id,st)=>{try{await api('/empresas/'+id+(st==='BLOCKED'?'/desbloquear':'/bloquear'),{method:'POST',body:'{}'});toast(st==='BLOCKED'?'Empresa desbloqueada.':'Empresa bloqueada.');crudCompanies(c)}catch(err){toast(err.message)}};window.archiveCompany=id=>confirmArchiveCompany(id,()=>crudCompanies(c));window.restoreCompany=async id=>{try{await api('/empresas/'+id+'/desarquivar',{method:'POST',body:'{}'});toast('Empresa restaurada.');crudCompanies(c)}catch(err){toast(err.message)}};window.deleteCompany=id=>confirmDeleteCompany(id,()=>crudCompanies(c));window.assignCompanyStaff=id=>assignCompanyStaff(id)}
 async function assignCompanyStaff(id){if(!(state.user.role==='OWNER'||state.user.role==='ACCOUNTANT'))return;try{const [team,current]=await Promise.all([api('/usuarios?page=1&page_size=100'),api('/empresas/'+id+'/responsaveis')]);const staff=(team.items||[]).filter(u=>u.role==='STAFF'&&u.active!==0);const selected=new Set((current.assignees||[]).map(a=>a.user_id));modal(`<form id="assignStaffForm">${modalHead('Designar equipe','Empresa sem responsável fica visível a toda a equipe. Com responsável, só esses funcionários veem, além do administrador e do contador.')}<div class="modal-body">${staff.length?staff.map(u=>`<label class="field" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="user_ids" value="${esc(u.id)}" ${selected.has(u.id)?'checked':''}><span>${esc(u.name)} <small class="muted">${esc(u.email||'')}</small></span></label>`).join(''):'<p class="muted">Cadastre usuários com perfil Equipe para designar empresas.</p>'}</div>${modalFoot('<button type="button" class="btn secondary" onclick="closeModal()">Cancelar</button><button class="btn" type="submit">Salvar</button>')}</form>`,'md');$('#assignStaffForm').onsubmit=async e=>{e.preventDefault();const user_ids=[...e.target.querySelectorAll('input[name="user_ids"]:checked')].map(i=>i.value);try{await api('/empresas/'+id+'/responsaveis',{method:'PUT',body:JSON.stringify({user_ids})});closeModal();toast('Equipe designada.','success');await crudCompanies($('#content'))}catch(err){toast(err.message)}}}catch(err){toast(err.message)}}
@@ -291,12 +689,12 @@ async function companyUsersPage(c,companyId){
   if(focusId){
     const focused=list.find(x=>x.id===focusId)||await api('/empresas/'+companyId+'/users/'+focusId).catch(()=>null);
     if(focused){
-      focusPanel=`<div class="panel" id="resetRequestPanel" style="margin-bottom:14px;border-color:#0f5f59"><h3 style="margin:0 0 8px">Solicitação de redefinição de acesso</h3><div class="form-grid"><div><small class="muted">Cliente</small><div>${esc(company.trade_name||company.name)}</div></div><div><small class="muted">Usuário</small><div>${esc(focused.name)}</div></div><div><small class="muted">E-mail</small><div>${esc(focused.email)}</div></div><div><small class="muted">Credencial</small><div>${esc(focused.credential_status||(focused.credential_configured?'CONFIGURADA':'NÃO CONFIGURADA'))}</div></div></div>${canReset?'<div class="row-actions" style="margin-top:14px"><button type="button" class="btn" id="focusResetBtn">Redefinir acesso</button></div>':''}</div>`;
+      focusPanel=`<div class="panel" id="resetRequestPanel" style="margin-bottom:14px;border-color:var(--color-primary)"><h3 style="margin:0 0 8px">Solicitação de redefinição de acesso</h3><div class="form-grid"><div><small class="muted">Cliente</small><div>${esc(company.trade_name||company.name)}</div></div><div><small class="muted">Usuário</small><div>${esc(focused.name)}</div></div><div><small class="muted">E-mail</small><div>${esc(focused.email)}</div></div><div><small class="muted">Credencial</small><div>${esc(focused.credential_status||(focused.credential_configured?'CONFIGURADA':'NÃO CONFIGURADA'))}</div></div></div>${canReset?'<div class="row-actions" style="margin-top:14px"><button type="button" class="btn" id="focusResetBtn">Redefinir acesso</button></div>':''}</div>`;
     }
     state.focusClientUserId=null;
     state.focusResetRequest=false;
   }
-  c.innerHTML=head('Usuários','Controle de acesso desta empresa.',(state.selectedCompany?'':'<button class="btn secondary" id="back">Voltar</button>')+'<button class="btn" id="new">+ Novo usuário</button>')+focusPanel+`<div class="panel table-wrap"><table class="table"><thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Situação</th><th>Credencial</th><th>Convite</th><th>Criação</th><th>Último acesso</th><th>Ações</th></tr></thead><tbody>${list.map(x=>`<tr${focusId&&x.id===focusId?' style="outline:2px solid #0f5f59"':''}><td>${esc(x.name)}</td><td>${esc(x.email)}</td><td>${profileLabel(x.profile)}</td><td>${clientAccessLabel(x)}</td><td>${esc(x.credential_status||(x.credential_configured?'CONFIGURADA':'NÃO CONFIGURADA'))}</td><td>${invitationLabel(x.invitation_status)}</td><td>${formatDate(x.created_at)}</td><td>${formatDate(x.last_access_at)}</td><td><div class="row-actions"><button class="btn secondary" onclick="editClientUser('${companyId}','${x.id}')">Editar</button><div class="more-wrap"><button type="button" class="icon-button more-btn" aria-label="Mais ações">⋮</button><div class="more-menu" hidden><button type="button" onclick="viewClientUser('${companyId}','${x.id}')">Visualizar</button>${canReset?`<button type="button" onclick="resetClientAccess('${x.id}')">Redefinir acesso</button>`:''}<button type="button" onclick="resendInvite('${x.id}')">Reenviar convite</button><button type="button" onclick="revokeInvite('${x.id}')">Revogar convite</button><button type="button" class="${x.active?'danger':'ok'}" onclick="toggleClientUser('${x.id}',${x.active?1:0})">${x.active?'Bloquear':'Desbloquear'}</button></div></div></div></td></tr>`).join('')||'<tr><td colspan="8" class="empty">Nenhum usuário.</td></tr>'}</tbody></table></div>`;
+  c.innerHTML=head('Usuários','Controle de acesso desta empresa.',(state.selectedCompany?'':'<button class="btn secondary" id="back">Voltar</button>')+'<button class="btn" id="new">+ Novo usuário</button>')+focusPanel+`<div class="panel table-wrap"><table class="table"><thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Situação</th><th>Credencial</th><th>Convite</th><th>Criação</th><th>Último acesso</th><th>Ações</th></tr></thead><tbody>${list.map(x=>`<tr${focusId&&x.id===focusId?' style="outline:2px solid var(--color-primary)"':''}><td>${esc(x.name)}</td><td>${esc(x.email)}</td><td>${profileLabel(x.profile)}</td><td>${clientAccessLabel(x)}</td><td>${esc(x.credential_status||(x.credential_configured?'CONFIGURADA':'NÃO CONFIGURADA'))}</td><td>${invitationLabel(x.invitation_status)}</td><td>${formatDate(x.created_at)}</td><td>${formatDate(x.last_access_at)}</td><td><div class="row-actions"><button class="btn secondary" onclick="editClientUser('${companyId}','${x.id}')">Editar</button><div class="more-wrap"><button type="button" class="icon-button more-btn" aria-label="Mais ações">⋮</button><div class="more-menu" hidden><button type="button" onclick="viewClientUser('${companyId}','${x.id}')">Visualizar</button>${canReset?`<button type="button" onclick="resetClientAccess('${x.id}')">Redefinir acesso</button>`:''}<button type="button" onclick="resendInvite('${x.id}')">Reenviar convite</button><button type="button" onclick="revokeInvite('${x.id}')">Revogar convite</button><button type="button" class="${x.active?'danger':'ok'}" onclick="toggleClientUser('${x.id}',${x.active?1:0})">${x.active?'Bloquear':'Desbloquear'}</button></div></div></div></td></tr>`).join('')||'<tr><td colspan="8" class="empty">Nenhum usuário.</td></tr>'}</tbody></table></div>`;
   $('#back')&&($('#back').onclick=()=>{state.companyUsers=null;crudCompanies(c)});
   $('#new').onclick=()=>clientUserModal(companyId);
   if($('#focusResetBtn')&&focusId)$('#focusResetBtn').onclick=()=>resetClientAccess(focusId);
@@ -352,20 +750,80 @@ async function approval(c){const page=state.listPage?.aprovacao||1;const f=state
 async function pendenciesPage(c){const page=state.listPage?.pendencias||1;await withList(c,()=>api('/pendencias?page='+page+'&page_size=25'),data=>{const list=listItems(data);const inCompany=!!state.selectedCompany;c.innerHTML=head('Pendências',inCompany?'Pendências da empresa ativa.':'Pendências abertas do escritório.')+`<div class="panel table-wrap"><table class="table"><thead><tr><th>O que aconteceu</th><th>Empresa</th><th>O que precisa ser feito</th><th>Quem deve agir</th><th>Data</th><th>Ação</th></tr></thead><tbody>${list.map(x=>{const r=String(x.reason||'').toLowerCase();const p=/urgente|bloque/.test(r)?'URGENTE':x.status==='OPEN'?'ATENÇÃO':'NORMAL';const copy=pendencyCopy(x);const act=pendencyAction(x,inCompany);const action=inCompany?(act.page?`<button class="btn" data-pendency-id="${esc(x.id)}">${esc(act.label)}</button>`:`<span class="muted">${esc(act.label)}</span>`):(x.company_id?`<button class="btn" data-pendency-id="${esc(x.id)}">${esc(act.label)}</button>`:'—');return `<tr><td data-label="O que aconteceu"><span class="badge pending">${p}</span> ${esc(copy.happened)}</td><td data-label="Empresa">${esc(x.company_name||'-')}</td><td data-label="O que precisa ser feito">${esc(copy.need)}</td><td data-label="Quem deve agir">${esc(x.assignee_name||'Escritório')}</td><td data-label="Data">${esc(x.created_at||'-')}</td><td data-label="Ação">${action}</td></tr>`}).join('')||`<tr><td colspan="6">${emptyState('Nenhuma pendência.','Está tudo em dia por aqui.')}</td></tr>`}</tbody></table></div>`+pagerHtml(data,'pendencias');document.querySelectorAll('[data-pendency-id]').forEach(b=>b.onclick=()=>{const x=list.find(i=>i.id===b.dataset.pendencyId);if(x)openPendency(x)});bindPager('pendencias',dir=>{state.listPage={...state.listPage,pendencias:Math.max(1,page+dir)};pendenciesPage(c)})})}
 async function plan(c){const plans=state.plans;c.innerHTML=head('Plano de Contas','Plano próprio de cada escritório, com importação e validação.','<button class="btn" id="import">Importar PDF/CSV</button>','plano')+`<div class="panel">${plans.map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)"><div><b>${esc(p.name)}</b><br><small class="muted">${p.account_count} contas · ${p.status}</small></div><button class="btn secondary" onclick="accounts('${p.id}')">Abrir contas</button></div>`).join('')||'<div class="empty">Nenhum plano importado.</div>'}</div>`;$('#import').onclick=()=>planImport()};window.accounts=async id=>{const a=await api('/plano-contas/'+id+'/accounts');modal(`${modalHead('Contas do plano','Contas importadas neste plano do escritório.','plano')}<input id="asearch" placeholder="Buscar código ou descrição" style="width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px"><div id="alist"></div>`);const draw=q=>$('#alist').innerHTML=`<div class="table-wrap"><table class="table"><tr><th>Código</th><th>Classificação</th><th>Tipo</th><th>Descrição</th></tr>${a.filter(x=>(x.description+' '+x.account_code+' '+x.classification_code).toLowerCase().includes(q.toLowerCase())).slice(0,500).map(x=>`<tr><td>${x.account_code}</td><td>${x.classification_code}</td><td>${x.account_type}</td><td>${esc(x.description)}</td></tr>`).join('')}</table></div>`;draw('');$('#asearch').oninput=e=>draw(e.target.value)};
 function planImport(){
-  let aiPreviewId=null,canImport=false;
+  let aiPreviewId=null,canImport=false,previewData=null;
+  const planPreviewError=(status,body)=>{
+    const code=String((body&&body.details&&body.details.code)||(body&&body.error)||'');
+    const msg=String((body&&body.message)||'');
+    if(/AI_|INTELIGENTE|intelligent/i.test(code+msg)&&!/PLAN_ACCOUNTS|PDF_|STRUCTURE|EXTRACTION|NO_ACCOUNTS|PREVIEW/i.test(code))return msg||'Sugestão inteligente indisponível.';
+    if(status===422||status===400)return msg||'Não foi possível interpretar o plano de contas.';
+    if(status>=500)return 'Não foi possível processar o arquivo.';
+    return msg||'Não foi possível processar o arquivo.';
+  };
+  const drawChartPreviewTable=(r,q,sit)=>{
+    const rows=(r.accounts||r.sample||[]).filter(x=>{
+      const hay=`${x.code||x.account_code||''} ${x.classification_code||x.classificacao||''} ${x.description||''}`.toLowerCase();
+      if(q&&!hay.includes(q.toLowerCase()))return false;
+      const st=x.status||'OK';
+      if(sit==='erro')return st==='ERRO';
+      if(sit==='alerta')return st==='ALERTA';
+      if(sit==='ok')return st==='OK';
+      return true;
+    });
+    const shown=rows.slice(0,200);
+    return `<div class="plan-preview-table table-wrap"><table class="table"><thead><tr><th>Código</th><th>Classificação</th><th>Descrição</th><th>Tipo</th><th>Situação</th></tr></thead><tbody>${shown.map(x=>`<tr><td>${esc(x.code||x.account_code||'')}</td><td>${esc(x.classification_code||x.classificacao||'')}</td><td>${esc(x.description||x.descricao||'')}</td><td>${esc(x.account_type==='S'?'Sintética':x.account_type==='A'?'Analítica':x.account_type||'')}</td><td>${esc(x.status||'OK')}</td></tr>`).join('')||`<tr><td colspan="5">Nenhuma conta neste filtro.</td></tr>`}</tbody></table></div>${rows.length>200?`<p class="muted">Mostrando 200 de ${rows.length}. Use a pesquisa para localizar.</p>`:''}`;
+  };
+  const renderPreview=(r)=>{
+    previewData=r;
+    const intelligent=r.source==='AI';
+    aiPreviewId=intelligent?r.id:null;
+    canImport=intelligent?r.status==='READY':Number(r.valid)>0;
+    const alerts=r.repeated_classifications||0;
+    const errs=r.rejected||(r.issues||[]).length||0;
+    const title=errs&&canImport?'Plano reconhecido com alertas':canImport?'Plano de contas reconhecido':'Não foi possível interpretar o plano de contas.';
+    $('#preview').innerHTML=`<div class="plan-preview">
+      <p class="muted">✓ Arquivo carregado${r.file?`: ${esc(r.file)}`:''}</p>
+      ${intelligent?'<p><span class="badge need">ESTRUTURA PROPOSTA PELA IA</span></p>':''}
+      <h3>${esc(title)}</h3>
+      ${r.company_name?`<p><b>Empresa:</b> ${esc(r.company_name)}</p>`:''}
+      ${r.company_cnpj?`<p><b>CNPJ:</b> ${esc(r.company_cnpj)}</p>`:''}
+      <p>${r.structure_recognized?'✓ Estrutura Código / Classificação / Descrição reconhecida':''}</p>
+      <div class="plan-preview-stats"><div><small>CONTAS ENCONTRADAS</small><b>${r.valid||0}</b></div><div><small>ALERTAS</small><b>${alerts}</b></div><div><small>ERROS</small><b>${errs}</b></div></div>
+      ${alerts?`<p class="muted">${alerts} classificações repetidas ·  ${r.exact_duplicates||0} duplicidades exatas. As classificações repetidas não impedem a importação quando pertencem a contas diferentes.</p>`:''}
+      ${r.valid&&errs?`<p>${r.valid} linhas foram encontradas, mas ${errs} precisam de revisão.</p>`:''}
+      ${canImport?`<p><b>${r.valid}</b> contas encontradas.</p>`:''}
+      <div class="plan-preview-tools"><input id="planSearch" placeholder="Pesquisar código, classificação ou descrição"><select id="planSit"><option value="">Todas</option><option value="ok">OK</option><option value="alerta">Alertas</option><option value="erro">Erros</option></select></div>
+      <div id="chartRows">${drawChartPreviewTable(r,'','')}</div>
+      ${!canImport?'<p>O arquivo foi recebido, mas sua estrutura não pôde ser reconhecida.</p><button type="button" class="btn secondary" id="planRetry">Tentar novamente</button>':''}
+    </div>`;
+    const paint=()=>{$('#chartRows').innerHTML=drawChartPreviewTable(r,$('#planSearch')&&$('#planSearch').value||'',$('#planSit')&&$('#planSit').value||'')};
+    $('#planSearch')&&($('#planSearch').oninput=paint);
+    $('#planSit')&&($('#planSit').onchange=paint);
+    $('#planRetry')&&($('#planRetry').onclick=()=>{$('#planfile').value='';$('#preview').innerHTML='';canImport=false;$('#importPlanSubmit').disabled=true});
+    $('#importPlanSubmit').disabled=!canImport;
+  };
   modal(`<form id="importForm">${modalHead('Importar plano de contas','PDF, CSV ou TXT. Confira a prévia antes de gravar.','plano')}<div class="modal-body"><div class="field"><label>Nome do plano</label><input name="name" placeholder="Plano de Contas 2026"></div><div class="drop"><input id="planfile" type="file" accept=".pdf,.csv,.txt" required><p>PDF, CSV ou TXT · até 25 MB</p></div><div id="preview"></div></div>${modalFoot('<button type="button" class="btn secondary" onclick="closeModal()">Cancelar</button><button class="btn" id="importPlanSubmit" type="submit" disabled>Importar definitivamente</button>')}</form>`,'lg');
   $('#planfile').onchange=async e=>{
-    aiPreviewId=null;canImport=false;$('#importPlanSubmit').disabled=true;
-    const f=e.target.files[0],fd=new FormData();fd.append('file',f);
+    aiPreviewId=null;canImport=false;previewData=null;$('#importPlanSubmit').disabled=true;
+    const f=e.target.files[0];if(!f)return;
+    $('#preview').innerHTML=`<div class="plan-steps" aria-busy="true"><p>Analisando arquivo...</p><p>✓ Arquivo recebido</p><p>• Extraindo texto...</p><p>• Identificando estrutura...</p><p>• Validando...</p></div>`;
+    const fd=new FormData();fd.append('file',f);
     try{
-      const response=await fetch('/api/plano-contas/preview',{method:'POST',headers:{Authorization:'Bearer '+state.token},body:fd});
-      const r=await response.json();if(!response.ok)throw Error(r.message||r.error);
-      const intelligent=r.source==='AI';aiPreviewId=intelligent?r.id:null;
-      canImport=intelligent?r.status==='READY':Number(r.valid)>0;
-      const table=(r.sample||[]).slice(0,20).map(x=>`<tr><td>${esc(x.code||x.account_code||'')}</td><td>${esc(x.description||'')}</td><td>${esc(x.account_type==='S'?'Sintética':x.account_type==='A'?'Analítica':x.account_type||'')}</td></tr>`).join('');
-      $('#preview').innerHTML=`${intelligent?'<p><span class="badge need">ESTRUTURA PROPOSTA PELA IA</span></p>':''}<p><b>${r.valid||0}</b> contas identificadas · <b>${r.rejected||0}</b> problemas</p>${r.message?`<div class="rule-box">${esc(r.message)}</div>`:''}${table?`<div class="table-wrap"><table class="table"><tr><th>Código</th><th>Descrição</th><th>Tipo</th></tr>${table}</table></div>`:''}<div class="rule-box">${esc((r.issues||[]).slice(0,20).map(x=>`Linha ${x.row||''}: ${x.reason}`).join('\n'))}</div>${!canImport?'<p class="muted">Nenhuma conta válida pode ser importada. Corrija a origem ou tente novamente.</p>':''}`;
-      $('#importPlanSubmit').disabled=!canImport;
-    }catch(error){$('#preview').innerHTML='<div class="rule-box">Não foi possível gerar a prévia.</div>';toast(error.message)}
+      const response=await fetch('/api/plano-contas/preview',{method:'POST',headers:authHeaders('/plano-contas/preview'),body:fd});
+      const r=await response.json();
+      if(!response.ok){
+        const msg=planPreviewError(response.status,r);
+        $('#preview').innerHTML=`<div class="panel"><b>Não foi possível interpretar o plano de contas.</b><p>${esc(msg)}</p><button type="button" class="btn secondary" id="planRetry">Tentar novamente</button></div>`;
+        $('#planRetry')&&($('#planRetry').onclick=()=>{$('#planfile').value='';$('#preview').innerHTML=''});
+        if(!/inteligente/i.test(msg))toast(msg,'error');
+        return;
+      }
+      if(r.source==='AI'&&r.status==='FAILED'){
+        $('#preview').innerHTML=`<div class="panel"><b>Sugestão inteligente indisponível.</b><p class="muted">O parser determinístico não identificou contas neste arquivo.</p></div>`;
+        toast(r.message||'Sugestão inteligente indisponível.','warning');
+        return;
+      }
+      renderPreview(r);
+    }catch(error){$('#preview').innerHTML=`<div class="panel"><b>Não foi possível processar o arquivo.</b><p>${esc(error.message)}</p><button type="button" class="btn secondary" id="planRetry">Tentar novamente</button></div>`;$('#planRetry')&&($('#planRetry').onclick=()=>{$('#planfile').value='';$('#preview').innerHTML=''});toast(error.message)}
   };
   $('#importForm').onsubmit=async e=>{
     e.preventDefault();if(!canImport)return toast('A importação exige uma prévia válida.');
@@ -376,7 +834,7 @@ function planImport(){
         r=await api('/plano-contas/preview-ia/'+aiPreviewId+'/importar',{method:'POST',body:JSON.stringify({name})});
       }else{
         const form=new FormData(e.target);form.append('file',$('#planfile').files[0]);
-        r=await fetch('/api/plano-contas/import',{method:'POST',headers:{Authorization:'Bearer '+state.token},body:form}).then(async response=>{const body=await response.json();if(!response.ok)throw Error(body.message||body.error);return body});
+        r=await fetch('/api/plano-contas/import',{method:'POST',headers:authHeaders('/plano-contas/import'),body:form}).then(async response=>{const body=await response.json();if(!response.ok)throw Error(planPreviewError(response.status,body));return body});
       }
       toast(`Importação concluída: ${r.imported} contas.`);closeModal();await render();
     }catch(error){toast(error.message)}
@@ -457,7 +915,109 @@ function accountingSuggestionModal(id,suggestion){
   $('#acceptAI').onclick=()=>accountingDecision(id,{decision:'ACCEPTED'});
 }
 window.accountingSuggestionModal=accountingSuggestionModal;
-async function documents(c){const page=state.listPage?.documentos||1;await withList(c,()=>api('/documentos?page='+page+'&page_size=25'),data=>{const list=listItems(data);c.innerHTML=head('Documentos','Comprovantes e anexos vinculados às empresas.','<button class="btn" id="new">+ Enviar documento</button>')+`<div class="panel table-wrap"><table class="table"><tr><th>Arquivo</th><th>Empresa</th><th>Origem</th><th>Tamanho</th><th>Situação</th><th>Data</th><th>Ações</th></tr>${list.map(x=>`<tr><td data-label="Arquivo"><div>${esc(x.original_name)}</div><small class="muted">${esc(x.source_label||originLabel(x.origin)||'-')}</small></td><td data-label="Empresa">${esc(x.company_name)}</td><td data-label="Origem">${esc(x.source_label||originLabel(x.origin)||'-')}</td><td data-label="Tamanho">${Math.round((x.size_bytes||0)/1024)} KB</td><td data-label="Situação">${esc(originLabel(x.status)||'-')}<div>${extractionStatusBadge(x.extraction_status)}</div></td><td data-label="Data">${x.created_at}</td><td data-label="Ações"><div class="row-actions"><button type="button" class="btn" data-doc-extract="${x.id}">${x.extraction_status?'Ver análise':'Analisar documento'}</button><button type="button" class="btn secondary" data-doc-view="${x.id}" data-doc-name="${esc(x.original_name)}" data-doc-mime="${esc(x.mime_type||'')}" data-doc-size="${x.size_bytes||0}">Visualizar</button><button type="button" class="btn secondary" data-doc-dl="${x.id}" data-doc-name="${esc(x.original_name)}">Baixar</button>${x.can_delete?`<button type="button" class="btn secondary" data-doc-del="${x.id}" data-doc-name="${esc(x.original_name)}">Excluir</button>`:''}</div></td></tr>`).join('')}</table>${!list.length?emptyState('Nenhum documento','Envie comprovantes para a carteira.'):''}</div>`+pagerHtml(data,'documentos');$('#new').onclick=()=>docModal();c.querySelectorAll('[data-doc-extract]').forEach(btn=>{btn.onclick=()=>documentExtractionModal(btn.dataset.docExtract)});c.querySelectorAll('[data-doc-view]').forEach(btn=>{btn.onclick=()=>viewOfficeDocument(btn.dataset.docView,btn.dataset.docName,btn.dataset.docMime,btn.dataset.docSize)});c.querySelectorAll('[data-doc-dl]').forEach(btn=>{btn.onclick=()=>downloadOfficeDocument(btn.dataset.docDl,btn.dataset.docName)});c.querySelectorAll('[data-doc-del]').forEach(btn=>{btn.onclick=()=>confirmOfficeDocumentDelete(btn.dataset.docDel)});bindPager('documentos',dir=>{state.listPage={...state.listPage,documentos:Math.max(1,page+dir)};documents(c)})})};function viewOfficeDocument(id,name,mime,size){CdsDocumentViewer.open({fileName:name,mimeType:mime,sizeBytes:size,viewUrl:'/api/documentos/'+id+'/view',downloadUrl:'/api/documentos/'+id+'/download',headers:()=>authHeaders('/documentos/'+id+'/view')})}window.viewOfficeDocument=viewOfficeDocument;async function downloadOfficeDocument(id,name){try{const r=await fetch('/api/documentos/'+id+'/download',{headers:authHeaders()});if(!r.ok){let j={};try{j=await r.json()}catch{}throw Error(j.message||j.error||'Não foi possível baixar o documento.')}const b=await r.blob(),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download=name||'documento';a.click();URL.revokeObjectURL(u)}catch(e){toast(e.message)}}function confirmOfficeDocumentDelete(id){modal(`${modalHead('Excluir documento?','Você está prestes a excluir este documento. Essa ação será registrada no histórico de auditoria.')}<div class="modal-body"><p>O documento sai da listagem operacional, mas o registro permanece auditado.</p></div>${modalFoot('<button type="button" class="btn secondary" onclick="closeModal()">Cancelar</button><button type="button" class="btn" id="confirmDocDelete">Excluir documento</button>')}`,'md');$('#confirmDocDelete').onclick=async()=>{try{await api('/documentos/'+id,{method:'DELETE'});closeModal();toast('Documento excluído.','success');await render()}catch(e){toast(e.message)}}}async function authDownload(e,id){e.preventDefault();await CdsDocumentViewer.open({fileName:'documento',viewUrl:'/api/documentos/'+id+'/view',downloadUrl:'/api/documentos/'+id+'/download',headers:()=>authHeaders('/documentos/'+id+'/view')});return false}function docModal(){modal(`<form id="docForm">${modalHead('Enviar documento','Arraste o arquivo ou clique na área de envio. PDF, JPG ou PNG.')}<div class="modal-body">${companyField()}<div class="dropzone" id="docDrop"><strong>Arraste o arquivo aqui</strong><span>ou clique para selecionar</span><small>PDF, JPG ou PNG</small><input name="file" type="file" required></div><div id="docUploadMsg" class="muted"></div></div>${modalFoot('<button type="button" class="btn secondary" onclick="closeModal()">Cancelar</button><button class="btn" id="docSubmit">Enviar</button>')}</form>`,'md');bindCompanyPicker();const drop=$('#docDrop');if(drop){drop.onclick=e=>{if(e.target.name!=='file')drop.querySelector('input')?.click()};drop.ondragover=e=>{e.preventDefault();drop.classList.add('over')};drop.ondragleave=()=>drop.classList.remove('over');drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');const input=drop.querySelector('input');if(e.dataTransfer.files[0]){const dt=new DataTransfer();dt.items.add(e.dataTransfer.files[0]);input.files=dt.files;toast('Documento anexado com sucesso.','success')}};const fileInp=drop.querySelector('input');if(fileInp)fileInp.onchange=e=>{if(e.target.files&&e.target.files[0])toast('Documento anexado com sucesso.','success')}}
+async function documents(c){
+  const page=state.listPage?.documentos||1;
+  const f=state.docFilters||(state.docFilters={q:'',company_id:'',source:'',status:'',extraction:'',period:'',from:'',to:''});
+  const localIso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const periodBounds=()=>{
+    const now=new Date();const today=localIso(now);
+    if(f.period==='today')return{from:today,to:today};
+    if(f.period==='7d'){const x=new Date(now);x.setDate(x.getDate()-6);return{from:localIso(x),to:today}}
+    if(f.period==='30d'){const x=new Date(now);x.setDate(x.getDate()-29);return{from:localIso(x),to:today}}
+    if(f.period==='month')return{from:`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`,to:today};
+    return{from:f.from||'',to:f.to||''};
+  };
+  const listQuery=()=>{
+    let q=`/documentos?page=${page}&page_size=25`;
+    if(f.q)q+='&q='+encodeURIComponent(f.q);
+    if(f.company_id&&!state.selectedCompany)q+='&company_id='+encodeURIComponent(f.company_id);
+    if(f.source)q+='&source='+encodeURIComponent(f.source);
+    if(f.status)q+='&status='+encodeURIComponent(f.status);
+    if(f.extraction)q+='&extraction_status='+encodeURIComponent(f.extraction);
+    const b=periodBounds();
+    if(b.from)q+='&from='+encodeURIComponent(b.from);
+    if(b.to)q+='&to='+encodeURIComponent(b.to);
+    return q;
+  };
+  const fileKind=x=>{
+    const m=String(x.mime_type||x.original_name||'').toLowerCase();
+    return m.includes('pdf')||String(x.original_name||'').toLowerCase().endsWith('.pdf')?'pdf':'img';
+  };
+  const sizeLabel=n=>{const kb=Math.max(1,Math.round(Number(n||0)/1024));return kb>=1024?(Math.round(kb/102.4)/10)+' MB':kb+' KB'};
+  const dateHtml=iso=>{
+    const d=new Date(iso);if(Number.isNaN(d.getTime()))return `<span>${esc(iso||'-')}</span>`;
+    const full=d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    const day=d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'});
+    const short=d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
+    const tm=d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+    return `<time datetime="${esc(iso)}" title="${esc(full)}"><span class="docs-date-full">${esc(day)}<br>${esc(tm)}</span><span class="docs-date-short">${esc(short)}<br>${esc(tm)}</span></time>`;
+  };
+  const situationHtml=x=>{
+    const st=String(x.status||'ACTIVE');
+    const pending=st==='PENDING_REVIEW'||st==='PENDING';
+    const label=pending?'PENDENTE':(st==='ACTIVE'?'ATIVO':(originLabel(st)||st));
+    const cls=pending?'pending':(st==='ACTIVE'?'approved':'need');
+    return `<div class="docs-status"><span class="badge ${cls}">${esc(label)}</span><small>${extractionStatusBadge(x.extraction_status)}</small></div>`;
+  };
+  const originHtml=x=>{
+    const src=String(x.source||'');
+    const ico=src==='CLIENT'?'users':'building';
+    return `<span class="docs-origin">${icon(ico)}<span>${esc(x.source_label||originLabel(x.origin)||'-')}</span></span>`;
+  };
+  const fileHtml=x=>`<div class="docs-file" title="${esc(x.original_name)}"><span class="docs-file-ico docs-file-${fileKind(x)}" aria-hidden="true">${icon('file')}</span><div><b>${esc(x.original_name)}</b><small class="muted">${esc(x.source_label||originLabel(x.origin)||'-')}</small></div></div>`;
+  const companyHtml=x=>{
+    const name=x.company_trade_name||x.company_name||'-';
+    const sub=x.company_cnpj?formatCnpj(x.company_cnpj):'';
+    return `<div class="docs-company"><b>${esc(name)}</b>${sub?`<small class="muted">${esc(sub)}</small>`:''}</div>`;
+  };
+  const actionsHtml=x=>{
+    const primary=x.extraction_status?'Ver análise':'Analisar';
+    return `<div class="docs-actions"><button type="button" class="btn docs-primary-action" data-doc-extract="${x.id}">${primary}</button><div class="more-wrap"><button type="button" class="icon-button more-btn" aria-label="Mais ações">⋮</button><div class="more-menu" hidden><button type="button" data-doc-view="${x.id}" data-doc-name="${esc(x.original_name)}" data-doc-mime="${esc(x.mime_type||'')}" data-doc-size="${x.size_bytes||0}">Visualizar</button><button type="button" data-doc-dl="${x.id}" data-doc-name="${esc(x.original_name)}">Baixar</button><button type="button" data-doc-extract="${x.id}">${x.extraction_status?'Ver análise':'Analisar'}</button>${x.can_delete?`<button type="button" data-doc-del="${x.id}" data-doc-name="${esc(x.original_name)}">Excluir</button>`:''}</div></div></div>`;
+  };
+  const bindDocActions=()=>{
+    $('#new')&&($('#new').onclick=()=>docModal());
+    c.querySelectorAll('[data-doc-extract]').forEach(btn=>{btn.onclick=()=>documentExtractionModal(btn.dataset.docExtract)});
+    c.querySelectorAll('[data-doc-view]').forEach(btn=>{btn.onclick=()=>viewOfficeDocument(btn.dataset.docView,btn.dataset.docName,btn.dataset.docMime,btn.dataset.docSize)});
+    c.querySelectorAll('[data-doc-dl]').forEach(btn=>{btn.onclick=()=>downloadOfficeDocument(btn.dataset.docDl,btn.dataset.docName)});
+    c.querySelectorAll('[data-doc-del]').forEach(btn=>{btn.onclick=()=>confirmOfficeDocumentDelete(btn.dataset.docDel)});
+    bindMoreMenus(c);
+    bindPager('documentos',dir=>{state.listPage={...state.listPage,documentos:Math.max(1,page+dir)};documents(c)});
+    const form=$('#docFilters');
+    if(form)form.onsubmit=e=>{
+      e.preventDefault();
+      const fd=new FormData(form);
+      state.docFilters={...f,q:String(fd.get('q')||'').trim(),company_id:String(fd.get('company_id')||''),source:String(fd.get('source')||''),status:String(fd.get('status')||''),extraction:String(fd.get('extraction')||''),period:String(fd.get('period')||'')};
+      state.listPage={...state.listPage,documentos:1};
+      documents(c);
+    };
+    $('#docClearFilters')&&($('#docClearFilters').onclick=()=>{state.docFilters={q:'',company_id:'',source:'',status:'',extraction:'',period:'',from:'',to:''};state.listPage={...state.listPage,documentos:1};documents(c)});
+  };
+  const filtered=!!(f.q||f.company_id||f.source||f.status||f.extraction||f.period||f.from||f.to);
+  c.innerHTML=`<div class="docs-page" aria-busy="true">${head('Documentos','Comprovantes e anexos vinculados às empresas.','<button class="btn" id="new">+ Enviar documento</button>')}<div class="sk-card" style="height:64px"></div><div class="sk-table"></div></div>`;
+  try{
+    const firms=state.selectedCompany?{items:[]}:await api('/empresas?page=1&page_size=100&status=ACTIVE').catch(e=>{if(e&&e.status===401)throw e;return{items:[]}});
+    const data=await api(listQuery());
+    const list=listItems(data);
+    const companyOpts=(firms.items||[]).map(co=>`<option value="${esc(co.id)}" ${f.company_id===co.id?'selected':''}>${esc(co.trade_name||co.name)}</option>`).join('');
+    const empty=list.length?'':(filtered
+      ?emptyState('Nenhum documento corresponde aos filtros.','Ajuste a pesquisa ou limpe os filtros.','<button type="button" class="btn secondary" id="docClearFilters">Limpar filtros</button>')
+      :emptyState('Nenhum documento encontrado','Os documentos enviados pelo cliente ou pelo escritório aparecerão aqui.','<button type="button" class="btn" id="newEmpty">+ Enviar documento</button>'));
+    const rows=list.map(x=>`<tr><td class="docs-col-file">${fileHtml(x)}</td><td class="docs-col-company">${companyHtml(x)}</td><td class="docs-col-origin">${originHtml(x)}</td><td class="docs-col-size">${sizeLabel(x.size_bytes)}</td><td class="docs-col-status">${situationHtml(x)}</td><td class="docs-col-date">${dateHtml(x.created_at)}</td><td class="docs-col-actions">${actionsHtml(x)}</td></tr>`).join('');
+    const cards=list.map(x=>`<article class="docs-card"><div class="docs-card-head">${fileHtml(x)}${actionsHtml(x)}</div>${companyHtml(x)}${originHtml(x)}${situationHtml(x)}<div class="docs-card-meta">${dateHtml(x.created_at)} · ${sizeLabel(x.size_bytes)}</div><button type="button" class="btn docs-card-primary" data-doc-extract="${x.id}">${x.extraction_status?'Ver análise':'Analisar'}</button></article>`).join('');
+    c.innerHTML=`<div class="docs-page">${head('Documentos','Comprovantes e anexos vinculados às empresas.','<button class="btn" id="new">+ Enviar documento</button>')}
+      <form class="panel docs-filters" id="docFilters"><input name="q" value="${esc(f.q||'')}" placeholder="Pesquisar documento ou arquivo" aria-label="Pesquisar documento ou arquivo">${state.selectedCompany?'':`<select name="company_id" aria-label="Empresa"><option value="">Todas as empresas</option>${companyOpts}</select>`}<select name="source" aria-label="Origem"><option value="">Todas as origens</option><option value="CLIENT" ${f.source==='CLIENT'?'selected':''}>Cliente</option><option value="OFFICE" ${f.source==='OFFICE'?'selected':''}>Escritório</option><option value="IMPORT" ${f.source==='IMPORT'?'selected':''}>Importação</option></select><select name="status" aria-label="Situação"><option value="">Todas as situações</option><option value="ACTIVE" ${f.status==='ACTIVE'?'selected':''}>Ativo</option><option value="PENDING_REVIEW" ${f.status==='PENDING_REVIEW'?'selected':''}>Pendente</option></select><select name="extraction" aria-label="Análise"><option value="">Todas as análises</option><option value="NONE" ${f.extraction==='NONE'?'selected':''}>Não analisado</option><option value="EXTRACTED" ${f.extraction==='EXTRACTED'?'selected':''}>Extraído</option><option value="FAILED" ${f.extraction==='FAILED'?'selected':''}>Falhou</option></select><select name="period" aria-label="Período"><option value="">Todo o período</option><option value="today" ${f.period==='today'?'selected':''}>Hoje</option><option value="7d" ${f.period==='7d'?'selected':''}>Últimos 7 dias</option><option value="30d" ${f.period==='30d'?'selected':''}>Últimos 30 dias</option><option value="month" ${f.period==='month'?'selected':''}>Mês atual</option></select><button class="btn secondary" type="submit">Filtrar</button><button type="button" class="btn secondary" id="docClearFilters">Limpar filtros</button></form>
+      <div class="panel docs-table-wrap table-wrap"><table class="table docs-table"><thead><tr><th>Arquivo</th><th>Empresa</th><th class="docs-col-origin">Origem</th><th class="docs-col-size">Tamanho</th><th>Situação</th><th>Data</th><th>Ações</th></tr></thead><tbody>${rows||''}</tbody></table></div>
+      <div class="docs-cards">${cards}</div>
+      ${empty}${pagerHtml(data,'documentos')}</div>`;
+    bindDocActions();
+    $('#newEmpty')&&($('#newEmpty').onclick=()=>docModal());
+  }catch(err){
+    if(err&&err.status===401)throw err;
+    c.innerHTML=emptyState('Não foi possível carregar os documentos.',esc(err.message||'Tente novamente.'),'<button type="button" class="btn" id="retryDocs">Tentar novamente</button>');
+    $('#retryDocs')&&($('#retryDocs').onclick=()=>documents(c));
+  }
+}
+function viewOfficeDocument(id,name,mime,size){CdsDocumentViewer.open({fileName:name,mimeType:mime,sizeBytes:size,viewUrl:'/api/documentos/'+id+'/view',downloadUrl:'/api/documentos/'+id+'/download',headers:()=>authHeaders('/documentos/'+id+'/view')})}window.viewOfficeDocument=viewOfficeDocument;async function downloadOfficeDocument(id,name){try{const r=await fetch('/api/documentos/'+id+'/download',{headers:authHeaders()});if(!r.ok){let j={};try{j=await r.json()}catch{}throw Error(j.message||j.error||'Não foi possível baixar o documento.')}const b=await r.blob(),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download=name||'documento';a.click();URL.revokeObjectURL(u)}catch(e){toast(e.message)}}function confirmOfficeDocumentDelete(id){modal(`${modalHead('Excluir documento?','Você está prestes a excluir este documento. Essa ação será registrada no histórico de auditoria.')}<div class="modal-body"><p>O documento sai da listagem operacional, mas o registro permanece auditado.</p></div>${modalFoot('<button type="button" class="btn secondary" onclick="closeModal()">Cancelar</button><button type="button" class="btn" id="confirmDocDelete">Excluir documento</button>')}`,'md');$('#confirmDocDelete').onclick=async()=>{try{await api('/documentos/'+id,{method:'DELETE'});closeModal();toast('Documento excluído.','success');await render()}catch(e){toast(e.message)}}}async function authDownload(e,id){e.preventDefault();await CdsDocumentViewer.open({fileName:'documento',viewUrl:'/api/documentos/'+id+'/view',downloadUrl:'/api/documentos/'+id+'/download',headers:()=>authHeaders('/documentos/'+id+'/view')});return false}function docModal(){modal(`<form id="docForm">${modalHead('Enviar documento','Arraste o arquivo ou clique na área de envio. PDF, JPG ou PNG.')}<div class="modal-body">${companyField()}<div class="dropzone" id="docDrop"><strong>Arraste o arquivo aqui</strong><span>ou clique para selecionar</span><small>PDF, JPG ou PNG</small><input name="file" type="file" required></div><div id="docUploadMsg" class="muted"></div></div>${modalFoot('<button type="button" class="btn secondary" onclick="closeModal()">Cancelar</button><button class="btn" id="docSubmit">Enviar</button>')}</form>`,'md');bindCompanyPicker();const drop=$('#docDrop');if(drop){drop.onclick=e=>{if(e.target.name!=='file')drop.querySelector('input')?.click()};drop.ondragover=e=>{e.preventDefault();drop.classList.add('over')};drop.ondragleave=()=>drop.classList.remove('over');drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');const input=drop.querySelector('input');if(e.dataTransfer.files[0]){const dt=new DataTransfer();dt.items.add(e.dataTransfer.files[0]);input.files=dt.files;toast('Documento anexado com sucesso.','success')}};const fileInp=drop.querySelector('input');if(fileInp)fileInp.onchange=e=>{if(e.target.files&&e.target.files[0])toast('Documento anexado com sucesso.','success')}}
 $('#docForm').onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target);const btn=$('#docSubmit');if(btn){btn.disabled=true;btn.classList.add('busy');btn.textContent='Enviando...'}try{const r=await fetch('/api/documentos/upload',{method:'POST',headers:authHeaders(),body:fd});const j=await r.json();if(!r.ok)throw Error(j.message||j.error);closeModal();toast('Documento enviado com sucesso.','success');await render()}catch(e){toast(e.message);if(btn){btn.disabled=false;btn.classList.remove('busy');btn.textContent='Enviar'}}}}
 async function processesPage(c){if(state.processView)return processDetailPage(c,state.processView);const q=state.processSearch||'';const page=state.listPage?.processos||1;const companyQ=state.selectedCompany?('&company_id='+encodeURIComponent(state.selectedCompany.id)):'';const data=await api('/processos?page='+page+'&page_size=25'+(q?'&q='+encodeURIComponent(q):'')+companyQ);const list=listItems(data);const occPage=state.listPage?.ocorrencias||1;const occ=await api('/processo-ocorrencias?page='+occPage+'&page_size=10'+companyQ).catch(()=>({items:[]}));const occList=listItems(occ);c.innerHTML=head('Processos','Modelos de processos do escritório e ocorrências por competência.','<button class="btn secondary" id="newOcc">+ Nova ocorrência</button><button class="btn" id="new">+ Novo processo</button>')+`<div class="panel" style="margin-bottom:14px"><input id="processSearch" placeholder="Buscar processo, setor ou empresa..." value="${esc(q)}" style="width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px"></div><div class="panel table-wrap"><table class="table"><thead><tr><th>Processo</th><th>Situação</th><th>Setor</th><th>Empresa</th><th>Etapas</th><th></th></tr></thead><tbody>${list.map(x=>`<tr><td data-label="Processo"><b>${esc(x.name)}</b><div class="muted">${esc(x.responsible_name||'-')}</div></td><td data-label="Situação">${processStatusBadge(x.status)}</td><td data-label="Setor">${esc(x.sector||'-')}</td><td data-label="Empresa">${esc(x.company_trade_name||x.company_name||'-')}</td><td data-label="Etapas">${x.step_count||0} etapas</td><td><button class="btn secondary" data-open="${esc(x.id)}">Abrir</button></td></tr>`).join('')||`<tr><td colspan="6">${emptyState('Nenhum processo','Cadastre o primeiro processo do escritório.')}</td></tr>`}</tbody></table></div>${pagerHtml(data,'processos')}<div class="panel table-wrap" style="margin-top:16px"><h3 style="padding:16px 16px 0">Ocorrências recentes</h3><table class="table"><thead><tr><th>Ocorrência</th><th>Competência</th><th>Situação</th><th>Etapas</th><th></th></tr></thead><tbody>${occList.map(x=>`<tr><td data-label="Ocorrência"><b>${esc(x.title)}</b><div class="muted">${esc(x.process_name||'')}</div></td><td data-label="Competência">${esc(x.competence)}</td><td data-label="Situação">${occurrenceStatusBadge(x.status)}</td><td data-label="Etapas">${x.step_count||0}</td><td><button class="btn secondary" data-occ="${esc(x.id)}">Ver</button></td></tr>`).join('')||`<tr><td colspan="5">${emptyState('Nenhuma ocorrência','Crie uma ocorrência manual a partir de um processo ativo.')}</td></tr>`}</tbody></table></div>`;
 bindPager('processos',dir=>{state.listPage={...(state.listPage||{}),processos:Math.max(1,(state.listPage?.processos||1)+dir)};processesPage(c)});
@@ -480,7 +1040,85 @@ function processFormModal(){const ctx=state.selectedCompany;modal(`<form id="pro
 function stepFormModal(processId,step,users,after){modal(`<form id="stepForm">${modalHead(step?'Editar etapa':'Nova etapa','Prazo relativo em dias a partir do início da ocorrência (D+N).')}<div class="modal-body"><div class="field"><label>Nome *</label><input name="name" required value="${esc(step?.name||'')}"></div><div class="field"><label>Descrição</label><textarea name="description" rows="2">${esc(step?.description||'')}</textarea></div><div class="grid" style="grid-template-columns:1fr 1fr;gap:12px"><div class="field"><label>Ordem</label><input name="step_order" type="number" min="1" value="${esc(step?.step_order||'')}"></div><div class="field"><label>Prazo (D+)</label><input name="due_offset_days" type="number" min="0" value="${esc(step?.due_offset_days??1)}"></div></div><div class="field"><label>Responsável</label><select name="responsible_user_id"><option value="">—</option>${(users||[]).map(u=>`<option value="${esc(u.id)}" ${step&&u.id===step.responsible_user_id?'selected':''}>${esc(u.name)}</option>`).join('')}</select></div><label class="field" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="required" ${(step?Number(step.required)!==0:true)?'checked':''}> Etapa obrigatória</label></div>${modalFoot('<button type="button" class="btn secondary" onclick="closeModal()">Cancelar</button><button class="btn" type="submit">Salvar</button>')}</form>`,'md');$('#stepForm').onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target);const body={name:fd.get('name'),description:fd.get('description'),due_offset_days:Number(fd.get('due_offset_days')||0),responsible_user_id:fd.get('responsible_user_id')||null,required:!!fd.get('required')};if(fd.get('step_order'))body.step_order=Number(fd.get('step_order'));try{if(step)await api('/processos/'+processId+'/etapas/'+step.id,{method:'PATCH',body:JSON.stringify(body)});else await api('/processos/'+processId+'/etapas',{method:'POST',body:JSON.stringify(body)});closeModal();toast('Etapa salva.','success');if(after)after()}catch(err){toast(err.message)}}}
 async function occurrenceFormModal(processList){const list=processList&&processList.length?processList:listItems(await api('/processos?page=1&page_size=100&status=ATIVO'));const ativos=list.filter(p=>p.status==='ATIVO');modal(`<form id="occForm">${modalHead('Nova ocorrência','Copia as etapas do modelo. Alterações futuras no processo não afetam esta ocorrência.')}<div class="modal-body"><div class="field"><label>Processo *</label><select name="process_id" required><option value="">Selecione...</option>${ativos.map(p=>`<option value="${esc(p.id)}">${esc(p.name)} — ${esc(p.company_trade_name||p.company_name||'')}</option>`).join('')}</select></div><div class="field"><label>Competência *</label><input name="competence" required placeholder="2026-09 ou 09/2026"></div></div>${modalFoot('<button type="button" class="btn secondary" onclick="closeModal()">Cancelar</button><button class="btn" type="submit">Criar ocorrência</button>')}</form>`,'md');$('#occForm').onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target);try{await api('/processo-ocorrencias',{method:'POST',body:JSON.stringify({process_id:fd.get('process_id'),competence:fd.get('competence')})});closeModal();toast('Ocorrência criada.','success');state.processView=null;processesPage($('#content'))}catch(err){toast(err.message)}}}
 async function occurrenceViewModal(id){try{const o=await api('/processo-ocorrencias/'+id);modal(`${modalHead(esc(o.title),'Competência '+esc(o.competence)+' · '+esc(o.company_trade_name||o.company_name||''))}<div class="modal-body"><p>${occurrenceStatusBadge(o.status)} · Responsável: ${esc(o.responsible_name||'-')}</p><div class="field"><label>Situação</label><select id="occStatus">${['PENDENTE','EM_ANDAMENTO','CONCLUIDA','CANCELADA'].map(s=>`<option value="${s}" ${o.status===s?'selected':''}>${s==='CONCLUIDA'?'CONCLUÍDA':s.replace('_',' ')}</option>`).join('')}</select></div><table class="table"><thead><tr><th>#</th><th>Etapa</th><th>Responsável</th><th>Prazo</th><th>Situação</th></tr></thead><tbody>${(o.steps||[]).map(s=>`<tr><td>${s.step_order}</td><td>${esc(s.name)}</td><td>${esc(s.responsible_name||'-')}</td><td>${dueLabel(s.due_offset_days)}</td><td>${esc(s.status)}</td></tr>`).join('')||'<tr><td colspan="5">Sem etapas copiadas.</td></tr>'}</tbody></table></div>${modalFoot('<button type="button" class="btn secondary" onclick="closeModal()">Fechar</button><button type="button" class="btn" id="saveOcc">Salvar situação</button>')}`,'lg');$('#saveOcc').onclick=async()=>{try{await api('/processo-ocorrencias/'+id,{method:'PATCH',body:JSON.stringify({status:$('#occStatus').value})});closeModal();toast('Ocorrência atualizada.','success');processesPage($('#content'))}catch(err){toast(err.message)}}}catch(err){toast(err.message)}}
-async function requests(c){const page=state.listPage?.solicitacoes||1;await withList(c,()=>api('/solicitacoes?page='+page+'&page_size=25'),data=>{const list=listItems(data);c.innerHTML=head('Solicitações','Comunicação estruturada entre empresa e escritório.','<button class="btn" id="new">+ Nova solicitação</button>')+`<div class="panel table-wrap"><table class="table"><tr><th>Empresa</th><th>Solicitação</th><th>Data</th><th>Situação</th><th>Responsável</th><th>Ação</th></tr>${list.map(x=>`<tr><td data-label="Empresa">${esc(x.company_name)}</td><td data-label="Solicitação">${esc(x.title)}</td><td data-label="Data">${x.created_at}</td><td data-label="Situação">${esc(originLabel(x.status))}</td><td data-label="Responsável">${esc(x.assigned_name||x.created_by_name||'-')}</td><td data-label="Ação"><div class="row-actions"><span class="badge ${x.priority==='HIGH'||x.priority==='URGENTE'?'rejected':x.priority==='LOW'?'approved':'pending'}">${esc(originLabel(x.priority||'NORMAL'))}</span>${x.company_id?`<button type="button" class="btn" onclick="enterCompany('${x.company_id}')">Abrir empresa</button>`:''}</div></td></tr>`).join('')}</table>${!list.length?emptyState('Nenhuma solicitação','Quando o escritório ou o cliente pedirem algo, aparecerá aqui.'):''}</div>`+pagerHtml(data,'solicitacoes');$('#new').onclick=()=>requestModal();bindPager('solicitacoes',dir=>{state.listPage={...state.listPage,solicitacoes:Math.max(1,page+dir)};requests(c)})})};function requestModal(){modal(`<form id="reqForm">${modalHead('Nova solicitação','Registre o pedido com empresa, tipo e descrição.')}<div class="modal-body"><div class="form-grid">${companyField()}<div class="field"><label>Tipo</label><select name="type"><option value="DOCUMENT">Documento</option><option value="QUESTION">Dúvida</option><option value="GENERAL">Geral</option></select></div><div class="field span2"><label>Título</label><input name="title" required></div><div class="field span2"><label>Descrição</label><textarea name="description" rows="4"></textarea></div></div></div>${modalFoot('<button type="button" class="btn secondary" onclick="closeModal()">Cancelar</button><button class="btn" type="submit">Enviar</button>')}</form>`,'md');bindCompanyPicker();$('#reqForm').onsubmit=async e=>{e.preventDefault();try{await api('/solicitacoes',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});closeModal();await render()}catch(e){toast(e.message)}}}
+async function requests(c){
+  if(state.requestView)return requestConversation(c,state.requestView);
+  const page=state.listPage?.solicitacoes||1;
+  const inCompany=!!state.selectedCompany;
+  await withList(c,()=>api('/solicitacoes?page='+page+'&page_size=25'),data=>{
+    const list=listItems(data);
+    const unreadTotal=Number(data.unread_total||0);
+    const cols=inCompany
+      ?'<tr><th>Solicitação</th><th>Última mensagem</th><th>Atualização</th><th>Situação</th><th>Ação</th></tr>'
+      :'<tr><th>Empresa</th><th>Solicitação</th><th>Última mensagem</th><th>Data</th><th>Situação</th><th>Ação</th></tr>';
+    const rows=list.map(x=>{
+      const unread=Number(x.unread_count||0)>0;
+      const blink=unread?' req-row-unread':'';
+      const titleCell=(unread?'<span class="req-unread-dot" title="Não lida">🔴</span> ':'')+'<b>'+esc(x.title)+'</b>';
+      const updated=x.updated_at||x.last_message?.created_at||x.created_at;
+      const action='<button type="button" class="btn" data-open-req="'+esc(x.id)+'" data-company="'+esc(x.company_id)+'">Abrir conversa</button>';
+      if(inCompany){
+        return '<tr class="'+blink+'"><td data-label="Solicitação">'+titleCell+'</td><td data-label="Última mensagem">'+esc(requestPreview(x))+'</td><td data-label="Atualização">'+esc(fmtMsgTime(updated))+'</td><td data-label="Situação">'+esc(requestStatusLabel(x.status))+'</td><td data-label="Ação">'+action+'</td></tr>';
+      }
+      return '<tr class="'+blink+'"><td data-label="Empresa">'+esc(x.company_trade_name||x.company_name||'-')+'</td><td data-label="Solicitação">'+titleCell+'</td><td data-label="Última mensagem">'+esc(requestPreview(x))+'</td><td data-label="Data">'+esc(fmtMsgTime(updated))+'</td><td data-label="Situação">'+esc(requestStatusLabel(x.status))+'</td><td data-label="Ação">'+action+'</td></tr>';
+    }).join('');
+    c.innerHTML=head('Solicitações'+(unreadTotal?' 🔴 '+unreadTotal:''),'Conversa contextual entre empresa e escritório.','<button class="btn" id="new">+ Nova solicitação</button>')+'<div class="panel table-wrap"><table class="table">'+cols+rows+'</table>'+(!list.length?emptyState('Nenhuma solicitação','Quando o escritório ou o cliente pedirem algo, aparecerá aqui.'):'')+'</div>'+pagerHtml(data,'solicitacoes');
+    $('#new').onclick=()=>requestModal();
+    c.querySelectorAll('[data-open-req]').forEach(btn=>{btn.onclick=()=>openRequestConversation(btn.dataset.company,btn.dataset.openReq)});
+    bindPager('solicitacoes',dir=>{state.listPage={...state.listPage,solicitacoes:Math.max(1,page+dir)};requests(c)});
+  });
+}
+async function requestConversation(c,requestId){
+  c.innerHTML=skeletonPage();
+  try{
+    const [req,messages]=await Promise.all([api('/solicitacoes/'+requestId),api('/solicitacoes/'+requestId+'/mensagens')]);
+    state.activeRequestId=requestId;
+    const closed=isRequestClosed(req.status);
+    const bubbles=(messages||[]).map(m=>{
+      const office=!m.role||m.role!=='CLIENT';
+      return '<div class="req-bubble '+(office?'office':'client')+'"><div class="req-bubble-meta">'+esc(office?'ESCRITÓRIO':'CLIENTE')+(m.user_name?' · '+esc(m.user_name):'')+'</div><div class="req-bubble-text">'+esc(m.message)+'</div><div class="req-bubble-time">'+esc(fmtMsgTime(m.created_at))+'</div></div>';
+    }).join('')||'<div class="muted" style="padding:16px">Nenhuma mensagem ainda.</div>';
+    const composer=closed
+      ?'<div class="req-composer muted">Solicitação '+esc(requestStatusLabel(req.status).toLowerCase())+'. Não é possível enviar novas mensagens.</div>'
+      :'<form class="req-composer" id="reqMsgForm"><textarea name="message" rows="2" placeholder="Digite uma mensagem..." required></textarea><button class="btn" type="submit">Enviar</button></form>';
+    const actions=['OWNER','ACCOUNTANT','STAFF'].includes(state.user.role)&&!closed
+      ?'<button type="button" class="btn secondary" id="reqConclude">Concluir</button><button type="button" class="btn secondary" id="reqCancel">Cancelar</button>'
+      :'';
+    c.innerHTML='<div class="req-chat"><div class="req-chat-head"><button type="button" class="btn secondary" id="reqBack">← Solicitações</button><div><h1>'+esc(req.title)+'</h1><p>'+esc(requestStatusLabel(req.status))+(req.company_trade_name||req.company_name?' · '+esc(req.company_trade_name||req.company_name):'')+'</p></div><div class="row-actions">'+actions+'</div></div><div class="req-chat-thread" id="reqThread">'+bubbles+'</div>'+composer+'</div>';
+    $('#reqBack').onclick=()=>{
+      state.requestView=null;state.activeRequestId=null;
+      if(state.selectedCompany)history.pushState({company:state.selectedCompany.id},'','/empresas/'+state.selectedCompany.id);
+      else history.pushState({},'','/');
+      requests(c);
+    };
+    const thread=$('#reqThread');if(thread)thread.scrollTop=thread.scrollHeight;
+    $('#reqMsgForm')&&($('#reqMsgForm').onsubmit=async e=>{
+      e.preventDefault();
+      const message=String(new FormData(e.target).get('message')||'').trim();
+      if(!message)return;
+      try{
+        await api('/solicitacoes/'+requestId+'/mensagens',{method:'POST',body:JSON.stringify({message})});
+        e.target.reset();
+        await requestConversation(c,requestId);
+        loadSidebarCounters().catch(()=>{});
+      }catch(err){toast(err.message)}
+    });
+    $('#reqConclude')&&($('#reqConclude').onclick=async()=>{
+      try{await api('/solicitacoes/'+requestId,{method:'PATCH',body:JSON.stringify({status:'CONCLUDED'})});toast('Solicitação concluída.','success');requestConversation(c,requestId)}catch(err){toast(err.message)}
+    });
+    $('#reqCancel')&&($('#reqCancel').onclick=async()=>{
+      if(!confirm('Cancelar esta solicitação?'))return;
+      try{await api('/solicitacoes/'+requestId,{method:'PATCH',body:JSON.stringify({status:'CANCELLED'})});toast('Solicitação cancelada.','success');requestConversation(c,requestId)}catch(err){toast(err.message)}
+    });
+    loadSidebarCounters().catch(()=>{});
+  }catch(err){
+    state.requestView=null;
+    toast(err.message||'Não foi possível abrir a conversa.');
+    requests(c);
+  }
+}
+function requestModal(){modal('<form id="reqForm">'+modalHead('Nova solicitação','Registre o pedido com empresa, tipo e descrição.')+'<div class="modal-body"><div class="form-grid">'+companyField()+'<div class="field"><label>Tipo</label><select name="type"><option value="DOCUMENT">Documento</option><option value="QUESTION">Dúvida</option><option value="GENERAL">Geral</option></select></div><div class="field span2"><label>Título</label><input name="title" required></div><div class="field span2"><label>Descrição</label><textarea name="description" rows="4"></textarea></div></div></div>'+modalFoot('<button type="button" class="btn secondary" onclick="closeModal()">Cancelar</button><button class="btn" type="submit">Enviar</button>')+'</form>','md');bindCompanyPicker();$('#reqForm').onsubmit=async e=>{e.preventDefault();try{const body=Object.fromEntries(new FormData(e.target));const created=await api('/solicitacoes',{method:'POST',body:JSON.stringify(body)});closeModal();toast('Solicitação criada.','success');await openRequestConversation(created.company_id,created.id)}catch(err){toast(err.message)}}
+}
+
 async function importsPage(c){const page=state.listPage?.importacoes||1;await withList(c,()=>api('/importacoes?page='+page+'&page_size=25'),data=>{const list=listItems(data);c.innerHTML=head('Importações','Importação contábil mensal no próprio CDS Contábil Connect. CDS Sistemas é origem opcional, sem integração externa nesta versão.','<button class="btn" id="new">+ Nova importação</button>')+`<div class="panel table-wrap"><table class="table"><tr><th>Empresa</th><th>Origem</th><th>Período</th><th>Registros</th><th>Situação</th><th>Data</th><th>Responsável</th></tr>${list.map(x=>`<tr><td data-label="Empresa">${esc(x.company_name)}</td><td data-label="Origem">${esc(x.origin_label)}${x.origin==='CDS_SISTEMAS'&&!x.imported_rows?' <span class="muted">· sem integração ativa</span>':''}</td><td data-label="Período">${esc((x.period_start||'-')+' → '+(x.period_end||'-'))}</td><td data-label="Registros">${x.imported_rows}/${x.total_rows}</td><td data-label="Situação">${esc(originLabel(x.status))}</td><td data-label="Data">${esc(x.created_at)}</td><td data-label="Responsável">${esc(x.created_by_name||'-')}</td></tr>`).join('')}</table>${!list.length?emptyState('Nenhuma importação','Registre uma importação contábil ou fiscal quando houver arquivo.'):''}</div>`+pagerHtml(data,'importacoes');$('#new').onclick=()=>importModal();bindPager('importacoes',dir=>{state.listPage={...state.listPage,importacoes:Math.max(1,page+dir)};importsPage(c)})})}
 function importPaySelect(){return `<select data-imp="method" required aria-label="Forma">${payOptions.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>`}
 function importRowHtml(){return `<tr class="import-row"><td><select data-imp="type" aria-label="Tipo"><option value="EXPENSE">Despesa</option><option value="REVENUE">Receita</option></select></td><td><input type="date" data-imp="occurred_on" required aria-label="Data"></td><td><input data-imp="description" required aria-label="Descrição" placeholder="Descrição"></td><td><input data-imp="amount" required inputmode="decimal" aria-label="Valor" placeholder="0,00"></td><td>${importPaySelect()}</td><td><button type="button" class="btn secondary import-remove">Remover</button></td></tr>`}
@@ -708,7 +1346,7 @@ async function aiSettingsPage(c){
     };
   };
   c.innerHTML=head('Inteligência Artificial','A IA é opcional. O CDS continua funcionando com os motores internos.')+
-    (s.warning_message?`<div class="panel" style="border-left:4px solid #b7791f;margin-bottom:14px"><b>Aviso</b><p>${esc(s.warning_message)}</p></div>`:'')+
+    (s.warning_message?`<div class="panel" style="border-left:4px solid var(--color-warning);margin-bottom:14px"><b>Aviso</b><p>${esc(s.warning_message)}</p></div>`:'')+
     `<div class="panel" style="margin-bottom:14px">
       <h3>Provedor e credencial</h3>
       <div class="form-grid">
@@ -727,7 +1365,7 @@ async function aiSettingsPage(c){
     </div>
     <div class="grid" style="grid-template-columns:1.1fr 1fr;gap:14px">
       <div class="panel">
-        <h3>Configuração do escritório</h3>
+        <h3>Configurações Avançadas</h3>
         <p><b>Status</b><br>${esc(statusDot)}</p>
         <p><b>Modelo</b><br>${esc(s.model_display||'GPT-5.6 Terra')}</p>
         <form id="aiSettingsForm">
@@ -795,14 +1433,215 @@ async function aiSettingsPage(c){
   });
 }
 async function auditPage(c){const list=await api('/auditoria');c.innerHTML=head('Auditoria','Registro de operações sensíveis da plataforma.')+`<div class="panel table-wrap"><table class="table"><tr><th>Data</th><th>Usuário</th><th>Ação</th><th>Entidade</th><th>ID</th></tr>${list.map(x=>`<tr><td>${x.created_at}</td><td>${esc(x.user_name||'-')}</td><td>${x.action}</td><td>${x.entity_type}</td><td>${esc(x.entity_id||'-')}</td></tr>`).join('')}</table></div>`}
-function modal(html,size='md'){document.body.insertAdjacentHTML('beforeend',`<div class="modal-back" id="modal" role="dialog" aria-modal="true"><div class="modal modal-${size}">${html}</div></div>`)}function modalHead(t,d='',helpKey){return `<div class="modal-head"><div><h2>${t}${helpKey?helpCircle(helpKey):''}</h2>${d?`<p class="modal-desc">${d}</p>`:''}</div><button type="button" class="btn secondary" onclick="closeModal()" aria-label="Fechar">Fechar ×</button></div>`}function modalFoot(inner){return `<div class="modal-foot">${inner}</div>`}function bindMoreMenus(scope){(scope||document).querySelectorAll('.more-btn').forEach(btn=>{btn.onclick=e=>{e.stopPropagation();const menu=btn.parentElement.querySelector('.more-menu');const open=menu.hidden;document.querySelectorAll('.more-menu').forEach(m=>m.hidden=true);menu.hidden=!open}});if(!window.__cdsMoreBound){window.__cdsMoreBound=true;document.addEventListener('click',()=>document.querySelectorAll('.more-menu').forEach(m=>m.hidden=true))}}window.closeModal=()=>$('#modal')?.remove();if(!window.__cdsEscModal){window.__cdsEscModal=true;document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#modal'))closeModal()})}window.addEventListener('popstate',()=>{if(state.token)render()});render();
-async function settingsPage(c){const t=state.tenant||{};const b=state.branding||{};const canBrand=['OWNER','ACCOUNTANT'].includes(state.user.role);c.innerHTML=head('Configurações','Identidade do escritório e dados da conta.')+`<div class="grid" style="grid-template-columns:1fr 1fr"><div class="panel"><h3>Conta</h3><p class="muted">${esc(state.user.name)} · ${esc(roleLabel(state.user.role))}<br>${esc(state.user.email||'')}</p></div><div class="panel"><h3>Escritório</h3><form id="officeForm"><div class="field"><label>Nome do escritório</label><input name="name" value="${esc(t.name||'')}" ${state.user.role==='OWNER'?'':'disabled'}></div><div class="field"><label>CNPJ</label><input name="cnpj" value="${esc(t.cnpj||'')}" ${state.user.role==='OWNER'?'':'disabled'}></div><div class="field"><label style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" name="assign_staff_companies" ${Number(t.assign_staff_companies)?'checked':''} ${state.user.role==='OWNER'?'':'disabled'}><span>Contabilidade designa cliente para a equipe</span></label><p class="muted">Desligado: toda a equipe vê todas as empresas. Ligado: empresa sem responsável continua visível a todos; empresa com responsável só aparece para esses funcionários, além do administrador e do contador.</p></div>${state.user.role==='OWNER'?'<button class="btn" style="margin-top:12px">Salvar escritório</button>':''}</form></div></div><div class="panel"><h3>Identidade do escritório</h3><p class="muted">Personalize como seu escritório aparece na plataforma.</p><div class="identity-preview">${state.brandingLogoSrc?`<img src="${state.brandingLogoSrc}" alt="Logo atual">`:`<div class="office-mark">${esc((b.office_name||t.name||'E').slice(0,1).toUpperCase())}</div>`}<div><b>${esc(b.office_name||t.name||'Escritório')}</b><small>${esc(b.slogan||'Pré-visualização da identidade')}</small></div></div><form id="brandForm"><div class="field"><label>Nome do escritório</label><input name="office_name" value="${esc(b.office_name||t.name||'')}" ${canBrand?'':'disabled'}></div><div class="field"><label>Slogan</label><input name="slogan" value="${esc(b.slogan||'')}" ${canBrand?'':'disabled'}></div>${canBrand?'<button class="btn" style="margin-top:12px">Salvar alterações</button>':''}</form><div class="logo-drop" id="logoDrop" style="margin-top:16px">${state.brandingLogoSrc?`<img src="${state.brandingLogoSrc}" alt="Pré-visualização da logo" style="max-height:64px">`:'Configure a identidade do seu escritório'}<div class="muted">PNG, JPG ou WEBP</div><input id="logoFile" type="file" accept="image/png,image/jpeg,image/webp" hidden></div><div class="row-actions" style="margin-top:12px">${canBrand?`<button type="button" class="btn" id="pickLogo">Enviar logo</button><button type="button" class="btn secondary" id="clearLogo">Remover logo</button>`:'<p class="muted">Somente o administrador ou o contador alteram a identidade.</p>'}</div></div><div class="panel"><h3>Comunicações</h3><p class="muted">E-mail do sistema e WhatsApp do escritório. A credencial SMTP nunca é exibida.</p><div class="row-actions"><button class="btn" id="openEmail">E-mail</button><button class="btn secondary" data-page="comunicacoes">WhatsApp</button></div></div><div class="panel"><h3>Avançadas</h3><p class="muted">Configuração do provedor de Inteligência Artificial da instalação. A API Key nunca é exibida após o cadastro.</p><div class="row-actions"><button class="btn" id="openAiAdvanced">Inteligência Artificial</button></div></div>`;
+function modal(html,size='md'){document.body.insertAdjacentHTML('beforeend',`<div class="modal-back" id="modal" role="dialog" aria-modal="true"><div class="modal modal-${size}">${html}</div></div>`)}function modalHead(t,d='',helpKey){return `<div class="modal-head"><div><h2>${t}${helpKey?helpCircle(helpKey):''}</h2>${d?`<p class="modal-desc">${d}</p>`:''}</div><button type="button" class="btn secondary" onclick="closeModal()" aria-label="Fechar">Fechar ×</button></div>`}function modalFoot(inner){return `<div class="modal-foot">${inner}</div>`}function bindMoreMenus(scope){
+  const hideAll=()=>document.querySelectorAll('.more-menu').forEach(m=>{m.hidden=true;m.classList.remove('more-menu-open');m.style.top='';m.style.left='';m.style.right=''});
+  (scope||document).querySelectorAll('.more-btn').forEach(btn=>{
+    btn.onclick=e=>{
+      e.stopPropagation();
+      const menu=btn.parentElement.querySelector('.more-menu');
+      const willOpen=menu.hidden;
+      hideAll();
+      if(!willOpen)return;
+      menu.hidden=false;
+      menu.classList.add('more-menu-open');
+      const r=btn.getBoundingClientRect();
+      const mw=Math.max(180,menu.offsetWidth||180);
+      const mh=menu.offsetHeight||160;
+      let left=r.right-mw;
+      if(left<8)left=8;
+      if(left+mw>window.innerWidth-8)left=Math.max(8,window.innerWidth-mw-8);
+      let top=r.bottom+6;
+      if(top+mh>window.innerHeight-8)top=Math.max(8,r.top-mh-6);
+      menu.style.top=top+'px';
+      menu.style.left=left+'px';
+      menu.style.right='auto';
+    };
+  });
+  (scope||document).querySelectorAll('.more-menu').forEach(menu=>{menu.onclick=e=>e.stopPropagation()});
+  if(!window.__cdsMoreBound){window.__cdsMoreBound=true;document.addEventListener('click',hideAll);window.addEventListener('scroll',hideAll,true);window.addEventListener('resize',hideAll)}
+}window.closeModal=()=>$('#modal')?.remove();if(!window.__cdsEscModal){window.__cdsEscModal=true;document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#modal'))closeModal()})}window.addEventListener('popstate',()=>{if(state.token)render()});
+if(!window.__cdsPushMsgBound){
+  window.__cdsPushMsgBound=true;
+  if(navigator.serviceWorker){
+    navigator.serviceWorker.addEventListener('message',ev=>{
+      const d=ev&&ev.data;
+      if(!d||d.type!=='CDS_PUSH_OPEN')return;
+      if(d.company_id&&d.request_id)openRequestConversation(d.company_id,d.request_id);
+      else if(d.company_id&&d.page)enterCompany(d.company_id,d.page);
+      else if(d.company_id)enterCompany(d.company_id,d.page||'dashboard');
+      else if(d.url)location.href=d.url;
+    });
+  }
+  window.__cdsLastNotifIds=window.__cdsLastNotifIds||new Set();
+  let officeNotifBootstrapped=false;
+  async function bootstrapOfficeNotifSeen(){
+    if(officeNotifBootstrapped||!state.token)return;
+    officeNotifBootstrapped=true;
+    try{
+      const data=await api('/notificacoes?page=1&page_size=25');
+      for(const n of (data.items||[])){if(n&&n.id)window.__cdsLastNotifIds.add(n.id)}
+    }catch{}
+  }
+  function handleOfficeNotification(n){
+    if(!n||!n.id||window.__cdsLastNotifIds.has(n.id))return;
+    window.__cdsLastNotifIds.add(n.id);
+    if(n.type==='REQUEST_MESSAGE_CREATED'||n.type==='REQUEST_UPDATED'||n.type==='REQUEST_CREATED'||n.type==='REQUEST_MESSAGE'){
+      if(state.requestView&&n.entity_id===state.requestView){
+        if(n.company_id)openRequestConversation(n.company_id,n.entity_id);
+        return;
+      }
+      showRequestAlert({
+        company_id:n.company_id,
+        request_id:n.entity_id,
+        company_name:n.company_name||'',
+        title:n.context||n.title,
+        preview:n.message
+      });
+      refreshNotifBadge();
+      loadSidebarCounters().catch(()=>{});
+      scheduleDashRefresh();
+      return;
+    }
+    const page=notifActionPage(n);
+    showCenterAlert({
+      type:n.type,
+      entity_id:n.entity_id,
+      headline:n.title||'Atualização',
+      company_name:n.company_name||'',
+      description:n.message||'',
+      preview:n.context||n.preview||'',
+      actionLabel:'Abrir',
+      onOpen:()=>{
+        if(n.occurrence_id){openNotification(n.id);return}
+        if(n.company_id)enterCompany(n.company_id,page);
+        else{state.page=page;render()}
+      }
+    });
+    refreshNotifBadge();
+    const t=n.type||n.event_type||'';
+    if(/DOCUMENT|EXPENSE|REVENUE|CLASSIFICATION|IMPORT|REQUEST|PENDENCY|PROCESS|ENTRY/.test(t))scheduleDashRefresh();
+  }
+  function startOfficeRealtime(){
+    if(window.__cdsOfficeEs||window.__cdsOfficeEsStarting)return;
+    if(!state.token||!window.CdsRealtime||!state.user||state.user.role==='CLIENT')return;
+    window.__cdsOfficeEsStarting=true;
+    bootstrapOfficeNotifSeen().then(()=>{
+      window.__cdsOfficeEs=CdsRealtime.connect(state.token,{
+        onNotification:n=>handleOfficeNotification(n),
+        onConnected:()=>scheduleDashRefresh()
+      });
+    }).finally(()=>{window.__cdsOfficeEsStarting=false});
+  }
+  window.__cdsStartOfficeRealtime=startOfficeRealtime;
+  // Fallback poll (SSE cobre o tempo real)
+  setInterval(async()=>{
+    if(!state.token||!state.user||state.user.role==='CLIENT')return;
+    try{
+      const data=await api('/notificacoes?page=1&page_size=10');
+      const items=data.items||[];
+      for(const n of items){
+        if(!n||n.read_at)continue;
+        handleOfficeNotification(n);
+      }
+    }catch{}
+  },15000);
+}
+if(window.CdsPush){CdsPush.ensureServiceWorker().catch(()=>{})}
+render();
+function settingsNavHtml(){
+  const items=[['geral','Geral'],['identidade','Identidade'],['equipe','Equipe e acesso'],['notificacoes','Notificações'],['comunicacoes','Comunicações'],['ia','Inteligência Artificial'],['sistema','Sistema']];
+  const cur=state.settingsSection||'geral';
+  return `<nav class="settings-nav" aria-label="Seções de configurações"><label class="sr-only" for="settingsSectionSelect">Seção</label><select id="settingsSectionSelect" class="settings-nav-select">${items.map(([id,label])=>`<option value="${id}" ${cur===id?'selected':''}>${label}</option>`).join('')}</select><div class="settings-nav-list">${items.map(([id,label])=>`<button type="button" class="settings-nav-item ${cur===id?'active':''}" data-settings-section="${id}">${label}</button>`).join('')}</div></nav>`;
+}
+function goSettingsSection(id){state.settingsSection=id||'geral';settingsPage($('#content'))}
+function openExistingPage(page,extra){if(page==='comunicacoes')state.commsTab=extra||'email';if(page==='comunicacoes'&&extra==='whatsapp')state.commsTab='whatsapp';state.emailEditing=false;state.selectedCompany=null;history.pushState({},'','/');state.page=page;render()}
+async function settingsPage(c){
+  const t=state.tenant||{};
+  const b=state.branding||{};
+  const canBrand=['OWNER','ACCOUNTANT'].includes(state.user.role);
+  const logoOk=!!(b.configured||b.has_logo)&&!!state.brandingLogoSrc;
+  const section=state.settingsSection||'geral';
+  const sections={
+    geral:`<div class="settings-block"><h3>Conta</h3><dl class="settings-dl"><div><dt>Nome</dt><dd>${esc(state.user.name)}</dd></div><div><dt>E-mail</dt><dd>${esc(state.user.email||'—')}</dd></div><div><dt>Perfil</dt><dd>${esc(roleLabel(state.user.role))}</dd></div><div><dt>Escritório</dt><dd>${esc(t.name||state.user.tenant_name||'—')}</dd></div></dl></div><div class="settings-block"><h3>Escritório</h3><form id="officeForm"><div class="field"><label for="officeName">Nome do escritório</label><input id="officeName" name="name" value="${esc(t.name||'')}" ${state.user.role==='OWNER'?'':'disabled'}></div><div class="field"><label for="officeCnpj">CNPJ</label><input id="officeCnpj" name="cnpj" value="${esc(t.cnpj||'')}" ${state.user.role==='OWNER'?'':'disabled'}></div><div class="field"><label class="check-row"><input type="checkbox" name="assign_staff_companies" ${Number(t.assign_staff_companies)?'checked':''} ${state.user.role==='OWNER'?'':'disabled'}><span>Contabilidade designa cliente para a equipe</span></label><p class="field-help">Desligado: toda a equipe vê todas as empresas. Ligado: empresa sem responsável continua visível a todos; empresa com responsável só aparece para esses funcionários, além do administrador e do contador.</p></div>${state.user.role==='OWNER'?'<button class="btn" type="submit">Salvar</button>':''}</form></div>`,
+    identidade:`<div class="settings-block"><h3>Identidade do Escritório</h3><p class="muted">Configure como seu escritório será apresentado aos clientes.</p><div class="identity-preview identity-preview-card">${state.brandingLogoSrc?`<img src="${state.brandingLogoSrc}" alt="Logo do escritório">`:`<div class="office-mark">${esc((b.office_name||t.name||'E').slice(0,1).toUpperCase())}</div>`}<div><b>${esc(b.office_name||t.name||'Escritório')}</b><small>Identidade apresentada ao cliente</small><p class="muted">${logoOk?'✓ Logo configurada':'Nenhuma logo configurada'}</p><p class="login-cds-soft muted">CDS Contábil Connect</p></div></div><form id="brandForm"><div class="field"><label for="officeBrandName">Nome do escritório</label><input id="officeBrandName" name="office_name" value="${esc(b.office_name||t.name||'')}" ${canBrand?'':'disabled'}></div><div class="field"><label for="officeSlogan">Slogan</label><input id="officeSlogan" name="slogan" value="${esc(b.slogan||'')}" ${canBrand?'':'disabled'}></div>${canBrand?'<button class="btn" type="submit">Salvar</button>':''}</form><div class="logo-drop" id="logoDrop">${state.brandingLogoSrc?`<img src="${state.brandingLogoSrc}" alt="Pré-visualização da logo">`:'Logo do escritório'}<div class="muted">PNG, JPG ou WEBP · máx. 5 MB</div><input id="logoFile" type="file" accept="image/png,image/jpeg,image/webp" hidden></div><div class="row-actions">${canBrand?`<button type="button" class="btn" id="pickLogo">${logoOk?'Alterar logo':'Enviar logo'}</button><button type="button" class="btn secondary" id="clearLogo" ${logoOk?'':'disabled'}>Remover logo</button>`:'<p class="muted">Somente o administrador ou o contador alteram a identidade.</p>'}</div></div>`,
+    equipe:`<div class="settings-block"><h3>Equipe e acesso</h3><p class="muted">Gerencie usuários, perfis e permissões do escritório.</p><button type="button" class="btn" id="openTeam">Gerenciar equipe</button></div>`,
+    notificacoes:`<div class="settings-block" id="notifSettingsBlock"><h3>Notificações</h3><p class="muted">Canal único do CDS Contábil Connect. Cada navegador precisa autorizar o Web Push separadamente.</p><p class="muted">Carregando preferências…</p></div>`,
+    comunicacoes:`<div class="settings-block"><h3>Comunicações</h3><p class="muted">Configure os canais de comunicação utilizados pelo escritório.</p><div class="settings-cards"><article class="settings-link-card"><h4>E-mail</h4><p>Configuração de e-mail</p><button type="button" class="btn" id="openEmail">Configurar</button></article><article class="settings-link-card"><h4>WhatsApp</h4><p>Configuração de WhatsApp</p><button type="button" class="btn secondary" id="openWhatsapp">Configurar</button></article></div></div>`,
+    ia:`<div class="settings-block" id="aiSettingsSummary"><h3>Inteligência Artificial</h3><p class="muted">Carregando resumo…</p></div>`,
+    sistema:`<div class="settings-block"><h3>Sistema</h3><p class="muted">Acesso às funções administrativas já existentes.</p><div class="settings-cards"><article class="settings-link-card"><h4>Auditoria</h4><p>Registros de ações do escritório</p><button type="button" class="btn" id="openAudit">Abrir</button></article><article class="settings-link-card"><h4>Informações do sistema</h4><p id="sysHealthLine">Produto, versão e status</p><button type="button" class="btn secondary" id="openHealth">Abrir</button></article></div></div>`
+  };
+  c.innerHTML=head('Configurações','Administre as configurações do escritório e do sistema.')+`<div class="settings-hub">${settingsNavHtml()}<div class="settings-main" id="settingsMain">${sections[section]||sections.geral}</div></div>`;
+  const jump=id=>goSettingsSection(id);
+  document.querySelectorAll('[data-settings-section]').forEach(btn=>btn.onclick=()=>jump(btn.dataset.settingsSection));
+  const sel=$('#settingsSectionSelect');if(sel)sel.onchange=()=>jump(sel.value);
   $('#officeForm')&&($('#officeForm').onsubmit=async e=>{e.preventDefault();try{const fd=new FormData(e.target);const body={name:fd.get('name'),cnpj:fd.get('cnpj'),assign_staff_companies:!!e.target.assign_staff_companies.checked};state.tenant=await api('/tenant',{method:'PATCH',body:JSON.stringify(body)});toast('Escritório atualizado.','success');settingsPage(c)}catch(err){toast(err.message,'error')}});
   $('#brandForm')&&($('#brandForm').onsubmit=async e=>{e.preventDefault();try{const body=Object.fromEntries(new FormData(e.target));await applyBranding(await api('/tenant/branding',{method:'PATCH',body:JSON.stringify(body)}));toast('Identidade atualizada.','success');settingsPage(c)}catch(err){toast(err.message,'error')}});
   $('#pickLogo')&&($('#pickLogo').onclick=()=>$('#logoFile').click());
-  $('#logoFile')&&($('#logoFile').onchange=async e=>{const file=e.target.files[0];if(!file)return;const fd=new FormData();fd.append('file',file);try{const r=await fetch('/api/tenant/branding/logo',{method:'POST',headers:authHeaders('/tenant/branding/logo'),body:fd});const data=await r.json().catch(()=>({}));if(!r.ok)throw new ApiError(humanApiError(r.status,data),r.status,data.error);await applyBranding(data);toast('Logo atualizada.','success');settingsPage(c)}catch(err){if(err&&err.status===401)return;toast(err.message||'Não foi possível enviar a logo.','error')}});
+  $('#logoFile')&&($('#logoFile').onchange=async e=>{const file=e.target.files[0];if(!file)return;if(file.size>5*1024*1024){toast('Arquivo muito grande. O tamanho máximo permitido é 5 MB.','error');e.target.value='';return}const fd=new FormData();fd.append('file',file);try{const r=await fetch('/api/tenant/branding/logo',{method:'POST',headers:authHeaders('/tenant/branding/logo'),body:fd});const data=await r.json().catch(()=>({}));if(!r.ok)throw new ApiError(humanApiError(r.status,data),r.status,data.error);await applyBranding(data);toast('Logo atualizada.','success');settingsPage(c)}catch(err){if(err&&err.status===401)return;toast(err.message||'Não foi possível enviar a logo.','error')}});
   $('#clearLogo')&&($('#clearLogo').onclick=async()=>{if(!confirm('Remover a logo do escritório?'))return;try{await applyBranding(await api('/tenant/branding/logo',{method:'DELETE'}));toast('Logo removida.','success');settingsPage(c)}catch(err){toast(err.message,'error')}});
-  document.querySelector('[data-page="comunicacoes"]')&&(document.querySelector('[data-page="comunicacoes"]').onclick=()=>{state.commsTab='whatsapp';state.selectedCompany=null;history.pushState({},'','/');state.page='comunicacoes';render()});
-  $('#openEmail')&&($('#openEmail').onclick=()=>{state.commsTab='email';state.emailEditing=false;state.selectedCompany=null;history.pushState({},'','/');state.page='comunicacoes';render()});
-  $('#openAiAdvanced')&&($('#openAiAdvanced').onclick=()=>{state.selectedCompany=null;history.pushState({},'','/');state.page='ia';render()});
+  $('#openTeam')&&($('#openTeam').onclick=()=>openExistingPage('usuarios'));
+  $('#openEmail')&&($('#openEmail').onclick=()=>openExistingPage('comunicacoes','email'));
+  $('#openWhatsapp')&&($('#openWhatsapp').onclick=()=>openExistingPage('comunicacoes','whatsapp'));
+  $('#openAiAdvanced')&&($('#openAiAdvanced').onclick=()=>openExistingPage('ia'));
+  $('#openAudit')&&($('#openAudit').onclick=()=>openExistingPage('auditoria'));
+  $('#openHealth')&&($('#openHealth').onclick=async()=>{try{const h=await api('/health');toast((h.product||'CDS Contábil Connect')+' · v'+(h.version||'1.0.0')+(h.ok?' · operacional':''),'info')}catch(err){toast(err.message)}});
+  if(section==='sistema'){
+    api('/health').then(h=>{const line=$('#sysHealthLine');if(line)line.textContent=(h.product||'CDS Contábil Connect')+' · v'+(h.version||'')}).catch(()=>{});
+  }
+  if(section==='ia'){
+    (async()=>{
+      const box=$('#aiSettingsSummary');if(!box)return;
+      try{
+        const summary=await api('/ai/usage/summary');
+        const s=summary.settings||{};
+        const u=s.usage||summary.usage||{};
+        const moneyUsd=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'USD'});
+        const status=s.enabled?'Ativa':'Inativa';
+        const model=s.model_display||'GPT-5.6 Terra';
+        const limit=s.monthly_limit_usd==null?'Sem limite':moneyUsd(s.monthly_limit_usd);
+        const consumed=moneyUsd(u.cost_usd||0);
+        box.innerHTML=`<h3>Inteligência Artificial</h3><dl class="settings-dl"><div><dt>Status</dt><dd>${esc(status)}</dd></div><div><dt>Modelo</dt><dd>${esc(model)}</dd></div><div><dt>Consumo</dt><dd>${esc(consumed)}${s.monthly_limit_usd!=null?' / '+esc(limit):''}</dd></div><div><dt>Limite mensal</dt><dd>${esc(limit)}</dd></div></dl><button type="button" class="btn" id="openAiAdvanced">Configurar Inteligência Artificial</button>`;
+        $('#openAiAdvanced')&&($('#openAiAdvanced').onclick=()=>openExistingPage('ia'));
+      }catch(err){box.innerHTML=`<h3>Inteligência Artificial</h3><p class="muted">${esc(err.message||'Não foi possível carregar o resumo.')}</p><button type="button" class="btn" id="openAiAdvanced">Configurar Inteligência Artificial</button>`;$('#openAiAdvanced')&&($('#openAiAdvanced').onclick=()=>openExistingPage('ia'))}
+    })().catch(()=>{});
+  }
+  if(section==='notificacoes'){
+    (async()=>{
+      const box=$('#notifSettingsBlock');if(!box)return;
+      let prefs={requests_enabled:true,documents_enabled:true,expenses_enabled:true,classification_enabled:true,approval_enabled:true,processes_enabled:true,integrations_enabled:true,push_enabled:true,visual_enabled:true,sound_enabled:false};
+      let pushInfo={configured:false};
+      try{prefs=await api('/push/prefs')}catch{}
+      try{pushInfo=await api('/push/public-key')}catch{}
+      const chk=(name,label)=>`<label class="check-row"><input type="checkbox" name="${name}" ${prefs[name]!==false?'checked':''}> ${label}</label>`;
+      box.innerHTML='<h3>Notificações</h3><p class="muted">Canal único do CDS Contábil Connect (portal aberto e Web Push com portal fechado).</p><form id="notifPrefsForm"><h4>Canais</h4>'+
+        chk('visual_enabled','Notificações no sistema')+
+        chk('push_enabled','Web Push')+
+        chk('sound_enabled','Som')+
+        '<h4>Preferências</h4>'+
+        chk('requests_enabled','Solicitações')+
+        chk('documents_enabled','Documentos')+
+        chk('expenses_enabled','Despesas')+
+        chk('classification_enabled','Classificação')+
+        chk('approval_enabled','Aprovação')+
+        chk('processes_enabled','Processos')+
+        chk('integrations_enabled','Integrações')+
+        '<div class="row-actions"><button class="btn" type="submit">Salvar</button><button type="button" class="btn secondary" id="enablePush">Permitir neste navegador</button><button type="button" class="btn secondary" id="testPush">Testar notificação</button></div><p class="field-help">'+(pushInfo.configured?'VAPID configurado. Clique em Permitir neste navegador e aceite o pedido do Chrome/Edge/Firefox.':'Web Push aguardando chaves VAPID no ambiente.')+'</p></form>';
+      $('#notifPrefsForm').onsubmit=async e=>{
+        e.preventDefault();
+        const fd=new FormData(e.target);
+        const body={};
+        for(const k of ['requests_enabled','documents_enabled','expenses_enabled','classification_enabled','approval_enabled','processes_enabled','integrations_enabled','push_enabled','visual_enabled','sound_enabled']){
+          body[k]=fd.get(k)==='on';
+        }
+        try{await api('/push/prefs',{method:'PUT',body:JSON.stringify(body)});toast('Preferências salvas.','success')}catch(err){toast(err.message)}
+      };
+      $('#enablePush')&&($('#enablePush').onclick=async()=>{
+        try{if(!window.CdsPush)throw new Error('Cliente Push indisponível.');await CdsPush.subscribePush(api);toast('Notificações ativadas neste navegador.','success')}catch(err){toast(err.message)}
+      });
+      $('#testPush')&&($('#testPush').onclick=async()=>{
+        try{const r=await api('/push/test',{method:'POST',body:'{}'});toast(r.sent?('Teste enviado ('+r.sent+').'):'Nenhuma assinatura ativa neste dispositivo. Ative o push primeiro.','success')}catch(err){toast(err.message)}
+      });
+    })().catch(()=>{});
+  }
 }
+

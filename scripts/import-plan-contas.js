@@ -1,3 +1,25 @@
-const fs=require('fs'),path=require('path'),crypto=require('crypto');const {db}=require('../backend/src/server');const pdfParse=require('pdf-parse');
-const id=()=>crypto.randomUUID();const norm=h=>String(h).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');const parseCsv=t=>{const ls=t.split(/\r?\n/).filter(Boolean),d=ls[0].includes(';')?';':',';const sp=l=>l.split(d).map(x=>x.trim().replace(/^"|"$/g,''));const h=sp(ls.shift()).map(norm);return ls.map(l=>{const v=sp(l),o={};h.forEach((k,i)=>o[k]=v[i]||'');return o})};const normalize=r=>({code:String(r.codigo??r.code??r.conta??'').trim(),cls:String(r.classificacao??r.classification??r.codigo??'').trim(),type:String(r.tipo??r.type??'A').toUpperCase(),desc:String(r.descricao??r.description??r.nome??'').trim()});
-(async()=>{const file=process.argv[2],tenantId=process.argv[3]||db.prepare('SELECT id FROM tenants ORDER BY created_at LIMIT 1').get()?.id;if(!file||!tenantId)throw Error('Uso: node scripts/import-plan-contas.js <arquivo.pdf|csv> [tenantId]');const ext=path.extname(file).toLowerCase();const text=ext==='.pdf'?(await pdfParse(fs.readFileSync(file))).text:fs.readFileSync(file,'utf8');const rows=ext==='.pdf'?text.split(/\r?\n/).flatMap(l=>{const m=l.match(/^\s*(\d+)\s+(\d{4,})\s+([SA])\s+(.+)$/i);return m?[{codigo:m[1],classificacao:m[2],tipo:m[3],descricao:m[4]}]:[]}):parseCsv(text);const data=rows.map(normalize).filter(x=>x.code&&x.desc),seen=new Set();const plan=id();db.transaction(()=>{db.prepare('INSERT INTO account_plans(id,tenant_id,name,status,source_file) VALUES(?,?,?,?,?)').run(plan,tenantId,path.basename(file),'ACTIVE',path.basename(file));const ins=db.prepare('INSERT INTO accounts(id,tenant_id,plan_id,source_id,account_code,classification_code,account_type,description,parent_code,level,is_postable,raw_data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)');for(const a of data){if(seen.has(a.code))continue;seen.add(a.code);const parent=a.cls.length>2?a.cls.slice(0,-2):null;ins.run(id(),tenantId,plan,a.code,a.code,a.cls,/^[SA]$/.test(a.type)?a.type:'A',a.desc,parent,Math.max(0,Math.floor(a.cls.length/2)-1),a.type==='A'?1:0,JSON.stringify(a))}});console.log({planId:plan,rows:rows.length,imported:seen.size})})().catch(e=>{console.error(e.message);process.exit(1)});
+const fs=require('fs'),path=require('path'),crypto=require('crypto');
+const {db}=require('../backend/src/server');
+const parser=require('../backend/src/chart-of-accounts/parser');
+const {extractPlanText}=require('../backend/src/chart-of-accounts/extract');
+const id=()=>crypto.randomUUID();
+(async()=>{
+  const file=process.argv[2],tenantId=process.argv[3]||db.prepare('SELECT id FROM tenants ORDER BY created_at LIMIT 1').get()?.id;
+  if(!file||!tenantId)throw Error('Uso: node scripts/import-plan-contas.js <arquivo.pdf|csv> [tenantId]');
+  const ext=path.extname(file).toLowerCase();
+  const extracted=await extractPlanText(fs.readFileSync(file),ext);
+  const parsed=parser.parsePlanSource(extracted.text,ext);
+  const preview=parser.buildPreview(parsed);
+  if(!preview.valid)throw Error('Nenhuma conta foi identificada no arquivo.');
+  const seen=new Set();
+  const plan=id();
+  db.transaction(()=>{
+    db.prepare('INSERT INTO account_plans(id,tenant_id,name,status,source_file) VALUES(?,?,?,?,?)').run(plan,tenantId,path.basename(file),'ACTIVE',path.basename(file));
+    const ins=db.prepare('INSERT INTO accounts(id,tenant_id,plan_id,source_id,account_code,classification_code,account_type,description,parent_code,level,is_postable,raw_data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)');
+    for(const a of preview.accounts){
+      if(seen.has(a.code))continue;seen.add(a.code);
+      ins.run(id(),tenantId,plan,a.code,a.code,a.classification_code,a.account_type,a.description,a.parent_code,a.level,a.account_type==='A'?1:0,JSON.stringify(a));
+    }
+  })();
+  console.log({planId:plan,rows:preview.total,imported:seen.size,repeated_classifications:preview.repeated_classifications});
+})().catch(e=>{console.error(e.message);process.exit(1)});

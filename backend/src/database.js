@@ -10,7 +10,7 @@ function ensureColumn(db, table, name, ddl) {
 }
 
 function applySchema(db, schemaDir) {
-  const skip = new Set(['010_company_cnpj.sql', '012_operational_central.sql', '021_process_execution.sql']);
+  const skip = new Set(['010_company_cnpj.sql', '012_operational_central.sql', '021_process_execution.sql', '033_notification_center.sql']);
   for (const f of fs.readdirSync(schemaDir).filter(x => x.endsWith('.sql')).sort()) {
     if (skip.has(f)) continue;
     db.exec(fs.readFileSync(path.join(schemaDir, f), 'utf8'));
@@ -68,7 +68,19 @@ function applySchema(db, schemaDir) {
   ensureColumn(db, 'notifications', 'entity_type', 'TEXT');
   ensureColumn(db, 'notifications', 'entity_id', 'TEXT');
   ensureColumn(db, 'notifications', 'context', 'TEXT');
+  ensureColumn(db, 'notifications', 'url', 'TEXT');
+  ensureColumn(db, 'notifications', 'preview', 'TEXT');
+  ensureColumn(db, 'notifications', 'actor_user_id', 'TEXT');
+  ensureColumn(db, 'user_notification_prefs', 'documents_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'user_notification_prefs', 'expenses_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'user_notification_prefs', 'classification_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'user_notification_prefs', 'approval_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'user_notification_prefs', 'processes_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'user_notification_prefs', 'integrations_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  try { db.exec(fs.readFileSync(path.join(schemaDir, '033_notification_center.sql'), 'utf8')); } catch {}
   db.exec(fs.readFileSync(path.join(schemaDir, '012_operational_central.sql'), 'utf8'));
+  ensureColumn(db, 'tenant_branding', 'logo_size', 'INTEGER');
+  ensureColumn(db, 'tenant_branding', 'logo_updated_at', 'TEXT');
   ensureColumn(db, 'tenants', 'assign_staff_companies', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'tenants', 'slug', 'TEXT');
   ensureColumn(db, 'entries', 'posted_at', 'TEXT');

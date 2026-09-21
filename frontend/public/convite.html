@@ -22,9 +22,9 @@ form.onsubmit=async e=>{e.preventDefault();const body=Object.fromEntries(new For
 if(isReset){
   form.hidden=true;details.innerHTML='';title.textContent='Senha criada com sucesso.';
   message.className='ok';message.innerHTML='Senha criada com sucesso.<div class="actions"><a href="'+(x.redirect||'/portal/')+'">Acessar Portal</a></div>';
-  if(x.token)localStorage.setItem('ccc_token',x.token);
+if(x.token){const dest=x.redirect||'/portal/';localStorage.setItem(dest.indexOf('/portal')===0?'ccc_client_token':'ccc_office_token',x.token);localStorage.removeItem('ccc_token')}
   return;
 }
-localStorage.setItem('ccc_token',x.token);message.className='ok';message.textContent='Conta ativada com sucesso. Redirecionando...';setTimeout(()=>location.href=x.redirect||'/portal/',400)
+{const dest=x.redirect||'/portal/';localStorage.setItem(dest.indexOf('/portal')===0?'ccc_client_token':'ccc_office_token',x.token);localStorage.removeItem('ccc_token')}message.className='ok';message.textContent='Conta ativada com sucesso. Redirecionando...';setTimeout(()=>location.href=x.redirect||'/portal/',400)
 }
 </script></body></html>

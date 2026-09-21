@@ -531,6 +531,6 @@ test('UI expõe página de Inteligência Artificial', () => {
   assert.match(js, /aiSettingsPage/);
   assert.match(js, /\/ai\/settings/);
   assert.match(js, /Utilizar Inteligência Artificial/);
-  assert.match(html, /app\.js\?v=s28-1/);
+  assert.match(html, /app\.js\?v=s28-4-2/);
   assert.doesNotMatch(js, /OPENAI_API_KEY/);
 });

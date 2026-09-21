@@ -10,8 +10,8 @@ test('tokens CSS da identidade visual existem',()=>{
 test('layout escritório tem sidebar, topbar e conteúdo',()=>{
   const js=read('frontend/public/assets/app.js');
   const html=read('frontend/public/index.html');
-  assert.match(html,/tokens\.css\?v=s13-15/);
-  assert.match(html,/theme\.css\?v=s13-23/);
+  assert.match(html,/tokens\.css\?v=s28-4-2/);
+  assert.match(html,/theme\.css\?v=s28-4-2/);
   assert.match(js,/app-shell/);
   assert.match(js,/id="sidebar"/);
   assert.match(js,/class="top"/);
@@ -30,7 +30,7 @@ test('dashboard possui saudação, KPIs reais e área da logo',()=>{
   const js=read('frontend/public/assets/app.js');
   assert.match(js,/officeIdentityHtml/);
   assert.match(js,/Configure a identidade do seu escritório/);
-  assert.match(js,/Aqui está o panorama da sua carteira de empresas/);
+  assert.match(js,/Veja o resumo da operação do seu escritório/);
   assert.match(js,/Lançamentos efetivados/);
   assert.match(js,/Movimentações por origem/);
   assert.match(js,/\/tenant\/branding/);

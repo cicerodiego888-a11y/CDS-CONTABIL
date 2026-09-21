@@ -207,7 +207,7 @@ test('21 card Despesas conta somente EXPENSE', async () => {
   const dash = await req('GET', '/api/dashboard', undefined, ownerA.token, companyA.id);
   assert.equal(op.data.expenses, dash.data.expense_count);
   assert.equal(typeof op.data.expenses, 'number');
-  assert.match(js, /label">Despesas<\/div><div class="value">\$\{op\.expenses\?\?d\.expense_count\?\?0\}/);
+  assert.match(js, /kpi\(\['despesas','Despesas',op\.expenses\?\?d\.expense_count\?\?0\]\)/);
   assert.doesNotMatch(js, /label">Despesas<\/div><div class="value">\$\{d\.movements/);
 });
 

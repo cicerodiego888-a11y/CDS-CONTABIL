@@ -271,7 +271,7 @@ test('paginação da carteira e edição de usuário permanecem',async()=>{
 
 test('HTML do escritório aponta consulta de CNPJ no cadastro',async()=>{
   const html=await fetch(base+'/').then(r=>r.text());
-  assert.match(html,/app\.js\?v=s28-1/);
+  assert.match(html,/app\.js\?v=s28-4-2/);
   const js=await fetch(base+'/assets/app.js?v=s13-15').then(r=>r.text());
   assert.match(js,/Consultar CNPJ/);
   assert.match(js,/\/api\/empresas\/consulta-cnpj/);

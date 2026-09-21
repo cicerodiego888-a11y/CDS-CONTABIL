@@ -206,14 +206,14 @@ test('menu global usa Equipe e acessos, empresa mantém Usuários', () => {
 test('HTML aponta assets versionados no escritório e no Portal', () => {
   const admin = read('frontend/public/index.html');
   const portal = read('frontend/public/portal/index.html');
-  assert.match(admin, /app\.js\?v=s28-1/);
+  assert.match(admin, /app\.js\?v=s28-4-2/);
   assert.match(admin, /smart-expense\.js\?v=s25-1/);
-  assert.match(admin, /theme\.css\?v=s13-23/);
-  assert.match(admin, /tokens\.css\?v=s13-15/);
+  assert.match(admin, /theme\.css\?v=s28-4-2/);
+  assert.match(admin, /tokens\.css\?v=s28-4-2/);
   assert.match(admin, /document-viewer\.js\?v=s13-14/);
-  assert.match(portal, /portal\.js\?v=s27-6/);
+  assert.match(portal, /portal\.js\?v=s28-4-2/);
   assert.match(portal, /smart-expense\.js\?v=s25-1/);
-  assert.match(portal, /portal\.css\?v=s13-12/);
+  assert.match(portal, /portal\.css\?v=s28-4-2/);
   assert.match(portal, /document-viewer\.js\?v=s13-14/);
 });
 

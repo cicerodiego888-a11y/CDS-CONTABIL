@@ -68,6 +68,29 @@ function mountProcessRoutes(app, deps) {
     } catch (e) { handle(e, res); }
   });
 
+  app.get('/api/processos/dashboard/proximos-prazos', auth, office, scope, (req, res) => {
+    try {
+      const companyId = req.companyScope || (req.query.company_id ? String(req.query.company_id) : null);
+      if (companyId && !ensureCompanyVisible(req, companyId)) return deny(res, 404, 'Empresa não encontrada.', 'NOT_FOUND');
+      let visibleCompanyIds;
+      if (!companyId) {
+        const all = service.listProcesses(req.user.tenant_id, { page: 1, pageSize: 5000 }).items;
+        visibleCompanyIds = [...new Set(all.filter(p => ensureCompanyVisible(req, p.company_id)).map(p => p.company_id))];
+      }
+      const from = req.query.from ? String(req.query.from) : null;
+      const to = req.query.to ? String(req.query.to) : null;
+      res.json({
+        items: service.listUpcomingDeadlines(req.user.tenant_id, {
+          companyId,
+          companyIds: visibleCompanyIds,
+          limit: req.query.limit,
+          from,
+          to
+        })
+      });
+    } catch (e) { handle(e, res); }
+  });
+
   app.post('/api/processos', auth, office, scope, (req, res) => {
     try {
       delete req.body.tenant_id;

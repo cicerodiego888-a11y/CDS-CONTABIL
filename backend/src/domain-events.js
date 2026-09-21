@@ -12,6 +12,9 @@ const EVENT_TYPES = Object.freeze({
   ENTRY_REJECTED: 'ENTRY_REJECTED',
   REQUEST_CREATED: 'REQUEST_CREATED',
   REQUEST_UPDATED: 'REQUEST_UPDATED',
+  REQUEST_MESSAGE_CREATED: 'REQUEST_MESSAGE_CREATED',
+  REQUEST_MESSAGE_READ: 'REQUEST_MESSAGE_READ',
+  REQUEST_STATUS_CHANGED: 'REQUEST_STATUS_CHANGED',
   PENDENCY_RESPONSE: 'PENDENCY_RESPONSE',
   COMPANY_CREATED: 'COMPANY_CREATED',
   IMPORT_CREATED: 'IMPORT_CREATED',
@@ -52,6 +55,7 @@ const OFFICE_EVENTS = new Set([
   EVENT_TYPES.ENTRY_POSTED,
   EVENT_TYPES.ENTRY_REJECTED,
   EVENT_TYPES.REQUEST_UPDATED,
+  EVENT_TYPES.REQUEST_MESSAGE_CREATED,
   EVENT_TYPES.PENDENCY_RESPONSE,
   EVENT_TYPES.COMPANY_CREATED,
   EVENT_TYPES.IMPORT_CREATED,
@@ -66,14 +70,15 @@ const CLIENT_CONFIRM_EVENTS = new Set([
 ]);
 
 const COMPANY_CLIENT_EVENTS = new Set([
-  EVENT_TYPES.REQUEST_CREATED
+  EVENT_TYPES.REQUEST_CREATED,
+  EVENT_TYPES.REQUEST_MESSAGE_CREATED
 ]);
 
 const PAYLOAD_KEYS = new Set([
   'amount_cents','description','payment_method','receipt_method','method','original_name',
   'status','note','title','imported_rows','total_rows','process_id','occurrence_id','step_id',
   'responsible_user_id','next_responsible_user_id','step_name','process_name','source',
-  'user_name','user_email','target_user_id','reference_type'
+  'user_name','user_email','target_user_id','reference_type','message_id','preview'
 ]);
 
 function moneyLabel(cents){
@@ -105,7 +110,11 @@ function copyFor(eventType, companyName, payload, audience){
   switch(eventType){
     case 'EXPENSE_CREATED':return{title:'Nova despesa recebida',message:`${name} enviou uma nova despesa`,context:ctx||payload.description||''};
     case 'REVENUE_CREATED':return{title:'Nova receita recebida',message:`${name} enviou uma nova receita`,context:ctx||payload.description||''};
-    case 'DOCUMENT_UPLOADED':return{title:'Novo documento recebido',message:`${name} enviou um documento`,context:file||''};
+    case 'DOCUMENT_UPLOADED':
+      if(audience==='company_client'){
+        return{title:'Novo documento',message:'O escritório enviou um documento para você.',context:file||''};
+      }
+      return{title:'Novo documento recebido',message:`${name} enviou um documento`,context:file||''};
     case 'CLASSIFICATION_REQUIRED':return{title:'Classificação pendente',message:`${name} possui uma movimentação aguardando classificação`,context:ctx||payload.description||''};
     case 'CLASSIFICATION_COMPLETED':return{title:'Classificação concluída',message:`Uma movimentação de ${name} foi classificada`,context:payload.description||''};
     case 'ENTRY_CREATED':return{title:'Lançamento gerado',message:`Novo lançamento de ${name}`,context:payload.description||''};
@@ -114,6 +123,8 @@ function copyFor(eventType, companyName, payload, audience){
     case 'ENTRY_REJECTED':return{title:'Lançamento rejeitado',message:`Um lançamento de ${name} foi rejeitado`,context:payload.note||payload.description||''};
     case 'REQUEST_CREATED':return{title:'Nova solicitação do escritório',message:'O escritório enviou uma solicitação',context:payload.title||payload.description||''};
     case 'REQUEST_UPDATED':return{title:'Resposta de solicitação recebida',message:`${name} respondeu uma solicitação`,context:payload.title||''};
+    case 'REQUEST_MESSAGE_CREATED':return{title:'Nova mensagem',message:`Nova mensagem em ${payload.title||'solicitação'}`,context:payload.preview||payload.title||''};
+    case 'REQUEST_STATUS_CHANGED':return{title:'Situação da solicitação',message:`Solicitação atualizada para ${payload.status||''}`,context:payload.title||''};
     case 'PENDENCY_RESPONSE':return{title:'Resposta de pendência recebida',message:`${name} respondeu uma pendência`,context:payload.description||''};
     case 'COMPANY_CREATED':return{title:'Nova empresa na carteira',message:`${payload.title||name} foi cadastrada no escritório`,context:payload.status||''};
     case 'IMPORT_CREATED':return{title:'Importação iniciada',message:`Importação registrada para ${name}`,context:payload.description||''};
@@ -131,7 +142,7 @@ function copyFor(eventType, companyName, payload, audience){
   }
 }
 
-function createEventBus({db,id,one,qRows,exec}){
+function createEventBus({db,id,one,qRows,exec,realtime,notificationService}){
   function prefOn(userId,eventType){
     const row=one('SELECT in_app_enabled FROM notification_preferences WHERE user_id=? AND event_type=?',userId,eventType);
     if(!row)return true;
@@ -153,24 +164,59 @@ function createEventBus({db,id,one,qRows,exec}){
     const nid=id();
     exec('INSERT OR IGNORE INTO notifications(id,tenant_id,user_id,type,title,message,event_id,company_id,recipient_user_id,entity_type,entity_id,context) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
       nid,tenantId,recipientId,eventType,title,message,eventId,companyId||null,recipientId,entityType,entityId,context||null);
+    if(realtime&&typeof realtime.publish==='function'){
+      try{
+        realtime.publish(recipientId,'notification',{
+          id:nid,
+          type:eventType,
+          title,
+          message,
+          context:context||null,
+          company_id:companyId||null,
+          entity_type:entityType||null,
+          entity_id:entityId||null,
+          event_id:eventId||null,
+          created_at:new Date().toISOString()
+        });
+      }catch{/* realtime best-effort */}
+    }
+    return nid;
   }
 
   function fanOut(event,companyName,payload){
     const recipients=new Map();
     const add=(uid,audience)=>{
       if(!uid||recipients.has(uid))return;
+      if(uid===event.actor_user_id&&event.event_type===EVENT_TYPES.REQUEST_MESSAGE_CREATED)return;
       if(!prefOn(uid,event.event_type))return;
       recipients.set(uid,audience);
     };
-    if(OFFICE_EVENTS.has(event.event_type)){
-      for(const uid of officeRecipients(event.tenant_id,event.actor_user_id,event.event_type))add(uid,'office');
-    }
-    if(CLIENT_CONFIRM_EVENTS.has(event.event_type)&&event.actor_user_id){
-      const actor=one('SELECT id,role,active FROM users WHERE id=? AND tenant_id=?',event.actor_user_id,event.tenant_id);
-      if(actor&&actor.role==='CLIENT'&&Number(actor.active)===1)add(actor.id,'client_actor');
-    }
-    if(COMPANY_CLIENT_EVENTS.has(event.event_type)&&event.company_id){
-      for(const uid of companyClients(event.tenant_id,event.company_id))add(uid,'company_client');
+    if(event.event_type===EVENT_TYPES.REQUEST_MESSAGE_CREATED){
+      const actor=event.actor_user_id?one('SELECT id,role FROM users WHERE id=? AND tenant_id=?',event.actor_user_id,event.tenant_id):null;
+      // Cliente → escritório já notifica via REQUEST_UPDATED (compat). Aqui só escritório → cliente.
+      if(actor&&actor.role!=='CLIENT'&&event.company_id){
+        for(const uid of companyClients(event.tenant_id,event.company_id))add(uid,'company_client');
+      }
+    }else if(event.event_type===EVENT_TYPES.DOCUMENT_UPLOADED){
+      const actor=event.actor_user_id?one('SELECT id,role FROM users WHERE id=? AND tenant_id=?',event.actor_user_id,event.tenant_id):null;
+      if(actor&&actor.role==='CLIENT'){
+        // Cliente enviou → notificar escritório
+        for(const uid of officeRecipients(event.tenant_id,event.actor_user_id,event.event_type))add(uid,'office');
+      }else if(event.company_id){
+        // Escritório enviou → notificar CLIENTES da empresa
+        for(const uid of companyClients(event.tenant_id,event.company_id))add(uid,'company_client');
+      }
+    }else{
+      if(OFFICE_EVENTS.has(event.event_type)){
+        for(const uid of officeRecipients(event.tenant_id,event.actor_user_id,event.event_type))add(uid,'office');
+      }
+      if(CLIENT_CONFIRM_EVENTS.has(event.event_type)&&event.actor_user_id){
+        const actor=one('SELECT id,role,active FROM users WHERE id=? AND tenant_id=?',event.actor_user_id,event.tenant_id);
+        if(actor&&actor.role==='CLIENT'&&Number(actor.active)===1)add(actor.id,'client_actor');
+      }
+      if(COMPANY_CLIENT_EVENTS.has(event.event_type)&&event.company_id){
+        for(const uid of companyClients(event.tenant_id,event.company_id))add(uid,'company_client');
+      }
     }
     const insertMany=db.transaction(list=>{
       for(const [uid,audience] of list){
@@ -222,6 +268,17 @@ function createEventBus({db,id,one,qRows,exec}){
       fanOut(event,companyName,payload);
     }catch(err){
       console.error('notification_handler_failed',{event_type:eventType,tenant_id:tenantId,company_id:companyId,entity_type:entityType,entity_id:entityId});
+    }
+    // Motor central: Web Push como canal (não origem). Falha não cancela o evento.
+    if(notificationService&&typeof notificationService.deliverPushForDomainEvent==='function'){
+      setImmediate(()=>{
+        try{
+          Promise.resolve(notificationService.deliverPushForDomainEvent(event,companyName,payload))
+            .catch(err=>console.error('notification_push_domain_failed',err&&err.message));
+        }catch(err){
+          console.error('notification_push_domain_failed',err&&err.message);
+        }
+      });
     }
     return event;
   }

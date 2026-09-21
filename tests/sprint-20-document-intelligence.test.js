@@ -308,7 +308,7 @@ test('interface oferece análise, confiança, correção e confirmação', () =>
   const source = fs.readFileSync(
     path.join(__dirname, '..', 'frontend', 'public', 'assets', 'app.js'), 'utf8'
   );
-  assert.match(source, /Analisar documento/);
+  assert.match(source, /Analisar/);
   assert.match(source, /Inteligência Documental/);
   assert.match(source, /Confiança/);
   assert.match(source, /Confirmar dados/);

@@ -734,6 +734,64 @@ function createProcessService({ db, id }) {
     };
   }
 
+  function listUpcomingDeadlines(tenantId, opts) {
+    opts = opts || {};
+    const cap = Math.min(50, Math.max(1, Number(opts.limit) || 8));
+    const p = [tenantId];
+    let where = "s.tenant_id=? AND s.status NOT IN('CONCLUIDA','CANCELADA') AND s.due_date IS NOT NULL";
+    if (opts.companyId) {
+      where += ' AND o.company_id=?';
+      p.push(opts.companyId);
+    } else if (Array.isArray(opts.companyIds)) {
+      if (!opts.companyIds.length) return [];
+      where += ` AND o.company_id IN (${opts.companyIds.map(() => '?').join(',')})`;
+      p.push(...opts.companyIds);
+    }
+    if (opts.from) { where += ' AND date(s.due_date)>=date(?)'; p.push(String(opts.from)); }
+    if (opts.to) { where += ' AND date(s.due_date)<=date(?)'; p.push(String(opts.to)); }
+    else { where += " AND date(s.due_date)<=date('now','+90 days')"; }
+    const list = rows(
+      `SELECT s.id, s.name step_name, s.due_date, s.status step_status, s.step_order,
+              o.id occurrence_id, o.title, o.status occurrence_status, o.company_id, o.process_id,
+              pr.name process_name, c.name company_name, c.trade_name
+         FROM process_occurrence_steps s
+         JOIN process_occurrences o ON o.id=s.occurrence_id
+         JOIN processes pr ON pr.id=o.process_id
+         JOIN companies c ON c.id=o.company_id
+        WHERE ${where}
+        ORDER BY CASE
+          WHEN date(s.due_date)<date('now') THEN 0
+          WHEN date(s.due_date)<=date('now','+2 days') THEN 1
+          ELSE 2 END,
+          s.due_date ASC, s.step_order ASC
+        LIMIT ?`,
+      ...p, cap
+    );
+    return list.map((r) => {
+      const deadline_status = classifyDueDate(r.due_date, r.step_status);
+      const due = String(r.due_date || '').slice(0, 10);
+      const todayIso = isoDate(new Date()) || '';
+      let days = null;
+      if (due && todayIso) {
+        days = Math.round((new Date(`${due}T12:00:00Z`) - new Date(`${todayIso}T12:00:00Z`)) / 86400000);
+      }
+      return {
+        id: r.id,
+        occurrence_id: r.occurrence_id,
+        process_id: r.process_id,
+        company_id: r.company_id,
+        due_date: due,
+        type_label: r.process_name || r.step_name,
+        title: r.title,
+        step_name: r.step_name,
+        company_name: r.trade_name || r.company_name,
+        status: deadline_status,
+        occurrence_status: r.occurrence_status,
+        days
+      };
+    });
+  }
+
   function purgeCompany(tenantId, companyId) {
     run('DELETE FROM process_occurrence_steps WHERE tenant_id=? AND occurrence_id IN (SELECT id FROM process_occurrences WHERE tenant_id=? AND company_id=?)', tenantId, tenantId, companyId);
     run('DELETE FROM process_occurrences WHERE tenant_id=? AND company_id=?', tenantId, companyId);
@@ -762,6 +820,7 @@ function createProcessService({ db, id }) {
     reopenOccurrenceStep,
     updateOccurrenceStep,
     processDashboard,
+    listUpcomingDeadlines,
     purgeCompany,
     parseCompetence,
     PROCESS_STATUSES,
