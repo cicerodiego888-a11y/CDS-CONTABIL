@@ -4,8 +4,17 @@ let isReset=false,accessToken=null,redirectTo='/portal/';
 function showError(text){title.textContent='Acesso';details.textContent=text;form.hidden=true;message.className='error';message.textContent='';}
 function storeToken(tok,dest){
   if(!tok)return;
-  localStorage.setItem(dest.indexOf('/portal')===0?'ccc_client_token':'ccc_office_token',tok);
-  localStorage.removeItem('ccc_token');
+  fetch('/api/health',{credentials:'include',cache:'no-store'}).then(r=>r.json()).then(h=>{
+    if(h&&h.auth_cookie){
+      try{localStorage.removeItem('ccc_client_token');localStorage.removeItem('ccc_office_token');localStorage.removeItem('ccc_token')}catch{}
+      return;
+    }
+    localStorage.setItem(dest.indexOf('/portal')===0?'ccc_client_token':'ccc_office_token',tok);
+    localStorage.removeItem('ccc_token');
+  }).catch(()=>{
+    localStorage.setItem(dest.indexOf('/portal')===0?'ccc_client_token':'ccc_office_token',tok);
+    localStorage.removeItem('ccc_token');
+  });
 }
 function showPinStep(){
   stage.innerHTML='';

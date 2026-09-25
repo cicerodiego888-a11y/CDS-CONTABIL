@@ -220,8 +220,11 @@ test('9 token inválido é rejeitado', async () => {
 test('10 appPublicUrl usa CDS_EMAIL_APP_URL e não porta do escritório por padrão no dual-front', () => {
   // module already loaded with CDS_EMAIL_APP_URL=http://app.test.local
   const src = fs.readFileSync(path.join(__dirname, '../backend/src/server.js'), 'utf8');
+  assert.match(src, /resolveAppPublicUrl/);
   assert.match(src, /CLIENT_PORT/);
-  assert.match(src, /Convites\/PASSWORD_RESET pertencem ao front do cliente/);
+  const urls = fs.readFileSync(path.join(__dirname, '../backend/src/public-urls.js'), 'utf8');
+  assert.match(urls, /CDS_EMAIL_APP_URL/);
+  assert.match(urls, /CLIENT_PORT/);
   const svc = fs.readFileSync(path.join(__dirname, '../backend/src/communications/communication-service.js'), 'utf8');
   assert.match(svc, /url:inviteUrl/);
   assert.match(svc, /url:payload\.url\|\|''/);

@@ -12,7 +12,8 @@ if (!fs.existsSync(db)) {
 }
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const destDir = path.join(config.ROOT, 'backups', 'backup-' + stamp);
+const backupRoot = config.BACKUP_DIR || path.join(config.ROOT, 'backups');
+const destDir = path.join(backupRoot, 'backup-' + stamp);
 fs.mkdirSync(destDir, { recursive: true });
 fs.copyFileSync(db, path.join(destDir, 'cds-contabil-connect.db'));
 const shm = db + '-shm';
@@ -28,6 +29,7 @@ fs.writeFileSync(path.join(destDir, 'MANIFEST.json'), JSON.stringify({
   created_at: new Date().toISOString(),
   cds_db_path: db,
   upload_dir: uploads,
+  backup_dir: backupRoot,
   portable: true,
   restore: 'node scripts/restore.js ' + path.join(destDir, 'cds-contabil-connect.db')
 }, null, 2));

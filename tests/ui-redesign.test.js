@@ -10,8 +10,8 @@ test('tokens CSS da identidade visual existem',()=>{
 test('layout escritório tem sidebar, topbar e conteúdo',()=>{
   const js=read('frontend/public/assets/app.js');
   const html=read('frontend/public/index.html');
-  assert.match(html,/tokens\.css\?v=s28-4-2/);
-  assert.match(html,/theme\.css\?v=s39-5/);
+  assert.match(html,/tokens\.css\?v=s40-modal/);
+  assert.match(html,/theme\.css\?v=s40-doc-preview/);
   assert.match(js,/app-shell/);
   assert.match(js,/id="sidebar"/);
   assert.match(js,/class="top"/);

@@ -204,7 +204,7 @@
 
   function connectRealtime(token, handlers) {
     const h = handlers || {};
-    if (!token || typeof EventSource === 'undefined') {
+    if (typeof EventSource === 'undefined') {
       return { close() {}, connected: false };
     }
     let es = null;
@@ -213,7 +213,10 @@
     function open() {
       if (closed) return;
       try { if (es) es.close(); } catch { /* */ }
-      const url = '/api/realtime/stream?token=' + encodeURIComponent(token);
+      const useQuery = token && token !== 'cookie';
+      const url = useQuery
+        ? '/api/realtime/stream?token=' + encodeURIComponent(token)
+        : '/api/realtime/stream';
       es = new EventSource(url);
       es.addEventListener('connected', () => {
         retryMs = 1000;

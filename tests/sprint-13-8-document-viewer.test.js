@@ -235,6 +235,10 @@ test('visualizador compartilhado: modal, tipos, loading, erro, ESC, baixar, sem 
   assert.match(viewer, /application\/pdf/);
   assert.match(viewer, /image\/jpeg/);
   assert.match(viewer, /image\/png/);
+  assert.match(viewer, /docViewerZoomIn|Aumentar zoom/);
+  assert.match(viewer, /docViewerZoomOut|Diminuir zoom/);
+  assert.match(viewer, /setZoom|ZOOM_STEP|scale\(/);
+  assert.match(css, /doc-viewer-zoom/);
   assert.match(viewer, /object-fit: contain|doc-viewer-image/);
   assert.match(css, /object-fit:\s*contain/);
   assert.match(css, /90vw/);

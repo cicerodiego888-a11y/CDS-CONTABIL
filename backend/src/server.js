@@ -1,5 +1,7 @@
 const path=require('path');
 const {loadConfig}=require('./config');
+const {resolveAppPublicUrl,resolveOfficePublicUrl}=require('./public-urls');
+const {listPrivateIPv4,listenHost,formatLanBanner}=require('./network-mode');
 const config=loadConfig(process.env);
 const express=require('express'),cors=require('cors'),fs=require('fs'),crypto=require('crypto'),bcrypt=require('bcryptjs'),jwt=require('jsonwebtoken'),multer=require('multer');
 const pdfParse=require('pdf-parse');
@@ -48,7 +50,7 @@ const {encryptPassword,decryptPassword,hasStoredCredential}=require('./email/cre
 const {setSmtpHooks,normalizeSmtpPassword}=require('./email/smtp');
 const ROOT=config.ROOT,DATA=config.CDS_DB_PATH,UPLOAD=config.UPLOAD_DIR,EXPORT=config.EXPORT_DIR,PUBLIC=config.PUBLIC_DIR;
 const PORT=config.PORT;
-const CLIENT_PORT=process.env.CLIENT_PORT===''||process.env.CLIENT_PORT==='0'?0:Number(process.env.CLIENT_PORT||PORT+1);
+const CLIENT_PORT=config.CLIENT_PORT;
 const clientFrontPorts=new Set();
 function markClientFrontPort(p){const n=Number(p);if(Number.isFinite(n)&&n>0)clientFrontPorts.add(n)}
 function requestListenPort(req){
@@ -62,6 +64,15 @@ function isClientFront(req){return clientFrontPorts.has(requestListenPort(req))}
 function publicFrontUrls(){
   const officePort=Number(PORT)||3333;
   const clientPort=CLIENT_PORT>0&&CLIENT_PORT!==officePort?CLIENT_PORT:null;
+  if(config.IS_PROD){
+    const base=String(config.OFFICE_PUBLIC_URL||process.env.CDS_OFFICE_PUBLIC_URL||'').replace(/\/$/,'');
+    return {
+      office_url:base?base+'/':null,
+      client_portal_url:base?base+'/portal/':null,
+      office_port:officePort,
+      client_port:clientPort
+    };
+  }
   return {
     office_url:'http://localhost:'+officePort+'/',
     client_portal_url:clientPort?'http://localhost:'+clientPort+'/':('http://localhost:'+officePort+'/portal/'),
@@ -76,9 +87,39 @@ const SECRET=config.JWT_SECRET;
 const IS_PROD=config.IS_PROD;
 let sessions;
 const app=express();app.disable('x-powered-by');
-const corsOrigins=String(process.env.CDS_CORS_ORIGIN||'').split(',').map(x=>x.trim()).filter(Boolean);
+const corsOrigins=String(config.CORS_ORIGIN||process.env.CDS_CORS_ORIGIN||'').split(',').map(x=>x.trim()).filter(Boolean);
+if(IS_PROD&&corsOrigins.some(o=>o==='*'||o.includes('*')))throw new Error('CDS_CORS_ORIGIN cannot use wildcard (*) in production.');
 app.use(cors(IS_PROD?{origin:corsOrigins.length?corsOrigins:false,credentials:true}:{origin:true}));
-app.use((req,res,next)=>{res.set({'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','X-DNS-Prefetch-Control':'off','Cache-Control':req.path.startsWith('/api/')?'no-store':'no-store'});next()});
+app.use((req,res,next)=>{
+  const headers={
+    'X-Content-Type-Options':'nosniff',
+    'X-Frame-Options':'DENY',
+    'Referrer-Policy':'no-referrer',
+    'X-DNS-Prefetch-Control':'off',
+    'Permissions-Policy':'camera=(), microphone=(), geolocation=(), payment=()',
+    'Cache-Control':req.path.startsWith('/api/')?'no-store':'no-store'
+  };
+  // CSP compatível com o frontend atual (scripts/CSS inline e same-origin). Hardening futuro: nonces.
+  headers['Content-Security-Policy']=[
+    "default-src 'self'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "style-src 'self' 'unsafe-inline'",
+    "script-src 'self' 'unsafe-inline'",
+    "connect-src 'self'",
+    "worker-src 'self' blob:",
+    "manifest-src 'self'"
+  ].join('; ');
+  const xfProto=String(req.headers['x-forwarded-proto']||'').split(',')[0].trim().toLowerCase();
+  const httpsOn=IS_PROD&&(xfProto==='https'||req.secure===true||/^https:\/\//i.test(String(config.OFFICE_PUBLIC_URL||'')));
+  if(httpsOn)headers['Strict-Transport-Security']='max-age=15552000; includeSubDomains';
+  res.set(headers);
+  next();
+});
 app.use(express.json({limit:'10mb',verify:(req,res,buf)=>{if(String(req.originalUrl||req.url||'').startsWith('/api/webhooks/whatsapp'))req.rawBody=buf}}));app.use(express.urlencoded({extended:true}));
 app.use((req,res,next)=>{if(req.body&&typeof req.body==='object'&&!Array.isArray(req.body))delete req.body.tenant_id;next()});
 ensureColumn('tenants','slug','TEXT');
@@ -337,21 +378,23 @@ function smtpCfgFromInput(tenantId,body){
   return {name:provider,host,port,user,password,from,fromName,secure,timeoutMs:Number(process.env.CDS_EMAIL_TIMEOUT_MS||10000)||10000};
 }
 function appPublicUrl(){
-  const fromEnvUrl=String(process.env.CDS_EMAIL_APP_URL||process.env.PUBLIC_URL||'').trim();
-  if(fromEnvUrl)return fromEnvUrl.replace(/\/$/,'');
-  // Convites/PASSWORD_RESET pertencem ao front do cliente quando dual-port está ativo.
-  const office=Number(process.env.PORT||3333)||3333;
-  const rawClient=process.env.CLIENT_PORT;
-  const client=rawClient===''||rawClient==='0'?0:Number(rawClient||office+1);
-  const port=client>0&&client!==office?client:office;
-  return 'http://localhost:'+port;
+  // Convites/PASSWORD_RESET: mesma origem pública do sistema; em prod nunca localhost.
+  return resolveAppPublicUrl({
+    env:process.env,
+    isProd:IS_PROD,
+    officePublicUrl:config.OFFICE_PUBLIC_URL,
+    port:PORT,
+    clientPort:CLIENT_PORT
+  });
 }
 /** Links de onboarding do escritório (/ativar-escritorio) usam o front do contador, não o portal. */
 function officePublicUrl(){
-  const explicit=String(process.env.CDS_OFFICE_PUBLIC_URL||process.env.PUBLIC_OFFICE_URL||'').trim();
-  if(explicit)return explicit.replace(/\/$/,'');
-  const office=Number(process.env.PORT||3333)||3333;
-  return 'http://localhost:'+office;
+  return resolveOfficePublicUrl({
+    env:process.env,
+    isProd:IS_PROD,
+    officePublicUrl:config.OFFICE_PUBLIC_URL,
+    port:PORT
+  });
 }
 function logCnpjAddress(payload){
   if(process.env.NODE_ENV==='production'&&process.env.CDS_CNPJ_DEBUG!=='1')return;
@@ -455,8 +498,8 @@ if(safe&&chosen&&chosen.debit_account_id!==chosen.credit_account_id){const debit
 const incomplete=candidates.filter(x=>x.incomplete);const dx=classificationDiagnosis(tenantId,companyId,tx);const reasons=ranked.length?['Há mais de uma possibilidade. Confira as contas e confirme o lançamento.']:(incomplete.length||dx.messages.length)?dx.messages.filter((m,i,a)=>a.indexOf(m)===i):['Não encontramos uma regra contábil para esta movimentação. Informe débito e crédito.'];return{status:'NEEDS_CLASSIFICATION',debit_account_id:null,credit_account_id:null,confidence:ranked[0]?ranked[0].score/100:0,score:ranked[0]?.score||0,origin:null,reason:reasons[0],reasons,candidates:ranked.concat(candidates.filter(x=>x.incomplete)),diagnosis:dx}}
 function createEntry(req,{companyId,sourceType,sourceId,date,description,amountCents,classification}){let classified=classification&&classification.status==='CLASSIFIED'&&classification.debit_account_id&&classification.credit_account_id;const lines=classified?[{account_id:classification.debit_account_id,side:'D',amount_cents:amountCents,memo:description},{account_id:classification.credit_account_id,side:'C',amount_cents:amountCents,memo:description}]:[];if(classified){try{validateAccountingSemantics({sourceType,lines})}catch{classified=false;lines.length=0;if(classification)classification.status='NEEDS_CLASSIFICATION'}}if(sourceId){const existing=one('SELECT * FROM entries WHERE tenant_id=? AND source_type=? AND source_id=?',req.user.tenant_id,sourceType,sourceId);if(existing){if(entryStates.isLocked(existing.status))return existing.id;accountingPeriodService.assertWritable(req.user.tenant_id,companyId,date);db.transaction(()=>{exec('DELETE FROM entry_lines WHERE entry_id=?',existing.id);if(lines.length){for(const l of lines)assertPostableAccount(req.user.tenant_id,l.account_id);persistEntryLines(existing.id,lines);exec("UPDATE entries SET status='PENDING',confidence=?,rejected_reason=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",classification.confidence||0,existing.id);exec("UPDATE pendencies SET status='RESOLVED',resolved_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND entity_type='ENTRY' AND entity_id=? AND status='OPEN'",req.user.tenant_id,existing.id)}else exec("UPDATE entries SET status='NEEDS_CLASSIFICATION',confidence=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",classification?.confidence||0,existing.id)})();saveClassificationRun(req,{companyId,sourceType,sourceId,entryId:existing.id,cls:classification||{status:'NEEDS_CLASSIFICATION',score:0,reasons:[]}});return existing.id}}
 accountingPeriodService.assertWritable(req.user.tenant_id,companyId,date);const eid=id();db.transaction(()=>{exec('INSERT INTO entries(id,tenant_id,company_id,source_type,source_id,occurred_on,description,status,confidence,generated_by) VALUES(?,?,?,?,?,?,?,?,?,?)',eid,req.user.tenant_id,companyId,sourceType,sourceId,date,description,classified?'PENDING':'NEEDS_CLASSIFICATION',classification?.confidence||0,req.user.sub);if(lines.length){for(const l of lines)assertPostableAccount(req.user.tenant_id,l.account_id);persistEntryLines(eid,lines)}else exec('INSERT INTO pendencies(id,tenant_id,company_id,entity_type,entity_id,reason) VALUES(?,?,?,?,?,?)',id(),req.user.tenant_id,companyId,'ENTRY',eid,'Movimentação aguardando classificação')})();saveClassificationRun(req,{companyId,sourceType,sourceId,entryId:eid,cls:classification||{status:'NEEDS_CLASSIFICATION',score:0,reasons:[]}});return eid}
-function entry(req,eid){const e=one('SELECT e.*,c.name company_name FROM entries e LEFT JOIN companies c ON c.id=e.company_id WHERE e.tenant_id=? AND e.id=?',req.user.tenant_id,eid);if(!e)return null;e.lines=qRows('SELECT l.*,a.account_code,a.description account_description,a.account_type FROM entry_lines l JOIN accounts a ON a.id=l.account_id WHERE l.entry_id=? ORDER BY l.side,l.id',eid);const b=qRows("SELECT side,SUM(amount_cents) total FROM entry_lines WHERE entry_id=? GROUP BY side",eid);e.debit=b.find(x=>x.side==='D')?.total||0;e.credit=b.find(x=>x.side==='C')?.total||0;e.balanced=e.debit===e.credit&&e.debit>0;const run=one('SELECT * FROM classification_runs WHERE entry_id=? ORDER BY created_at DESC LIMIT 1',eid);if(run){try{run.reasons=JSON.parse(run.reasons_json||'[]');run.candidates=JSON.parse(run.candidates_json||'[]')}catch{run.reasons=[];run.candidates=[]}e.classification=run}if(e.source_id&&e.source_type==='EXPENSE'){e.movement=one('SELECT x.id,x.occurred_on,x.description,x.amount_cents,x.payment_method method,x.category_id,x.bank_id,x.status,x.origin,x.document_id,b.name bank_name,cat.name category_name FROM expenses x LEFT JOIN banks b ON b.id=x.bank_id LEFT JOIN categories cat ON cat.id=x.category_id WHERE x.tenant_id=? AND x.id=?',req.user.tenant_id,e.source_id);if(e.movement&&e.movement.origin)e.origin=e.movement.origin}if(e.source_id&&e.source_type==='REVENUE'){e.movement=one('SELECT x.id,x.occurred_on,x.description,x.amount_cents,x.receipt_method method,x.category_id,x.bank_id,x.status,x.origin,x.document_id,b.name bank_name,cat.name category_name FROM revenues x LEFT JOIN banks b ON b.id=x.bank_id LEFT JOIN categories cat ON cat.id=x.category_id WHERE x.tenant_id=? AND x.id=?',req.user.tenant_id,e.source_id);if(e.movement&&e.movement.origin)e.origin=e.movement.origin}if(e.movement&&e.movement.document_id){const d=one('SELECT id,original_name,mime_type,size_bytes FROM documents WHERE id=? AND tenant_id=? AND deleted_at IS NULL',e.movement.document_id,req.user.tenant_id);if(d)e.document=d;const pipe=one('SELECT status,operation_type,confidence,confidence_band,confidence_reason,suggestion_json,fields_json FROM document_pipeline_runs WHERE tenant_id=? AND document_id=?',req.user.tenant_id,e.movement.document_id);if(pipe){let suggestion=null,fields=null;try{suggestion=JSON.parse(pipe.suggestion_json||'null')}catch{}try{fields=JSON.parse(pipe.fields_json||'null')}catch{}e.pipeline={status:pipe.status,operation_type:pipe.operation_type,confidence:pipe.confidence,confidence_band:pipe.confidence_band,confidence_reason:pipe.confidence_reason,suggestion,fields}}}e.timeline=qRows('SELECT a.action,a.created_at,u.name user_name FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id WHERE a.tenant_id=? AND a.entity_id=? ORDER BY a.created_at LIMIT 12',req.user.tenant_id,eid);if(e.movement){e.classification=e.classification||{};e.classification.diagnosis=classificationDiagnosis(req.user.tenant_id,e.company_id,{category_id:e.movement.category_id,bank_id:e.movement.bank_id})}return e}
-app.get('/api/health',(req,res)=>res.json({ok:true,product:'CDS Contábil Connect',version:'1.0.0',database:'sqlite',demo:!!config.DEMO_MODE,auth_cookie_ready:true,...publicFrontUrls()}));
+function entry(req,eid){const e=one('SELECT e.*,c.name company_name FROM entries e LEFT JOIN companies c ON c.id=e.company_id WHERE e.tenant_id=? AND e.id=?',req.user.tenant_id,eid);if(!e)return null;e.lines=qRows('SELECT l.*,a.account_code,a.description account_description,a.account_type FROM entry_lines l JOIN accounts a ON a.id=l.account_id WHERE l.entry_id=? ORDER BY l.side,l.id',eid);const b=qRows("SELECT side,SUM(amount_cents) total FROM entry_lines WHERE entry_id=? GROUP BY side",eid);e.debit=b.find(x=>x.side==='D')?.total||0;e.credit=b.find(x=>x.side==='C')?.total||0;e.balanced=e.debit===e.credit&&e.debit>0;const run=one('SELECT * FROM classification_runs WHERE entry_id=? ORDER BY created_at DESC LIMIT 1',eid);if(run){try{run.reasons=JSON.parse(run.reasons_json||'[]');run.candidates=JSON.parse(run.candidates_json||'[]')}catch{run.reasons=[];run.candidates=[]}e.classification=run}if(e.source_id&&e.source_type==='EXPENSE'){e.movement=one('SELECT x.id,x.occurred_on,x.description,x.amount_cents,x.payment_method method,x.category_id,x.bank_id,x.status,x.origin,x.document_id,x.supplier_name,b.name bank_name,cat.name category_name FROM expenses x LEFT JOIN banks b ON b.id=x.bank_id LEFT JOIN categories cat ON cat.id=x.category_id WHERE x.tenant_id=? AND x.id=?',req.user.tenant_id,e.source_id);if(e.movement&&e.movement.origin)e.origin=e.movement.origin}if(e.source_id&&e.source_type==='REVENUE'){e.movement=one('SELECT x.id,x.occurred_on,x.description,x.amount_cents,x.receipt_method method,x.category_id,x.bank_id,x.status,x.origin,x.document_id,b.name bank_name,cat.name category_name FROM revenues x LEFT JOIN banks b ON b.id=x.bank_id LEFT JOIN categories cat ON cat.id=x.category_id WHERE x.tenant_id=? AND x.id=?',req.user.tenant_id,e.source_id);if(e.movement&&e.movement.origin)e.origin=e.movement.origin}if(e.movement&&e.movement.document_id){const d=one('SELECT id,original_name,mime_type,size_bytes FROM documents WHERE id=? AND tenant_id=? AND deleted_at IS NULL',e.movement.document_id,req.user.tenant_id);if(d)e.document=d;const pipe=one('SELECT status,operation_type,confidence,confidence_band,confidence_reason,suggestion_json,fields_json FROM document_pipeline_runs WHERE tenant_id=? AND document_id=?',req.user.tenant_id,e.movement.document_id);if(pipe){let suggestion=null,fields=null;try{suggestion=JSON.parse(pipe.suggestion_json||'null')}catch{}try{fields=JSON.parse(pipe.fields_json||'null')}catch{}e.pipeline={status:pipe.status,operation_type:pipe.operation_type,confidence:pipe.confidence,confidence_band:pipe.confidence_band,confidence_reason:pipe.confidence_reason,suggestion,fields}}}e.timeline=qRows('SELECT a.action,a.created_at,u.name user_name FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id WHERE a.tenant_id=? AND a.entity_id=? ORDER BY a.created_at LIMIT 12',req.user.tenant_id,eid);if(e.movement){e.classification=e.classification||{};e.classification.diagnosis=classificationDiagnosis(req.user.tenant_id,e.company_id,{category_id:e.movement.category_id,bank_id:e.movement.bank_id})}return e}
+app.get('/api/health',(req,res)=>res.json({ok:true,product:'CDS Contábil Connect',version:'1.0.0',database:'sqlite',demo:!!config.DEMO_MODE,auth_cookie:!!config.AUTH_COOKIE,auth_cookie_ready:!!config.AUTH_COOKIE,...publicFrontUrls()}));
 // AUTH
 app.post('/api/auth/register',(req,res)=>{if(IS_PROD)return deny(res,403,'Registro público não está disponível.','REGISTER_DISABLED');const{name,email,password,tenantName,cnpj}=req.body;if(!name||!email||!password||!tenantName)return res.status(400).json({error:'FIELDS_REQUIRED'});const pw=passwordPolicyError(password);if(pw)return deny(res,400,pw,'INVALID_PASSWORD');const tid=id(),uid=id(),slug=uniqueTenantSlug(tenantName);try{db.transaction(()=>{exec('INSERT INTO tenants(id,name,cnpj,slug) VALUES(?,?,?,?)',tid,tenantName,cnpj||null,slug);exec('INSERT INTO users(id,tenant_id,name,email,password_hash,role) VALUES(?,?,?,?,?,?)',uid,tid,name,email.toLowerCase(),bcrypt.hashSync(password,12),'OWNER')})();res.status(201).json({id:uid,tenant_id:tid,tenant_slug:slug})}catch(e){res.status(409).json({error:'REGISTER_FAILED',message:e.message})}});
 app.post('/api/auth/signup',rateSignup,async(req,res)=>{
@@ -608,7 +651,10 @@ function finishLoginResponse(req,res,u){
   audit({user:{tenant_id:u.tenant_id,sub:u.id},ip:req.ip},'LOGIN','USER',u.id,null,{role:u.role,result:'ok'});
   const tenantSlug=one('SELECT slug FROM tenants WHERE id=?',u.tenant_id)?.slug||null;
   const office=officePublicIdentity(u.tenant_id);
-  if(config.AUTH_COOKIE)res.cookie('cds_session',token,{httpOnly:true,secure:IS_PROD,sameSite:'lax',path:'/',maxAge:12*60*60*1000});
+  if(config.AUTH_COOKIE){
+    const secureCookie=IS_PROD||/^https:\/\//i.test(String(config.OFFICE_PUBLIC_URL||process.env.CDS_OFFICE_PUBLIC_URL||''));
+    res.cookie('cds_session',token,{httpOnly:true,secure:secureCookie,sameSite:'lax',path:'/',maxAge:12*60*60*1000});
+  }
   const pinState=pinAuth.publicPinState(fresh);
   return res.json({
     token,
@@ -1547,4 +1593,54 @@ app.get('/*splat',(req,res)=>{if(req.path.startsWith('/api/'))return res.status(
 app.use((err,req,res,next)=>{if(err&&err.code==='LIMIT_FILE_SIZE')return deny(res,413,'O arquivo excede o tamanho máximo permitido.','FILE_TOO_LARGE');console.error(err);res.status(500).json({error:'INTERNAL_ERROR',message:'Não foi possível concluir esta operação.'})});
 function runProcessRecurrenceScheduler(){try{const now=new Date();const result=processService.recurrence.runDue(now);const overdue=processService.events.scanOverdue(now);if(result.created)console.log('process_recurrence_generated',result.created);if(overdue.notified)console.log('process_overdue_notifications',overdue.notified);if(result.errors.length)console.warn('process_recurrence_errors',result.errors)}catch(e){console.error('process_recurrence_scheduler_error',e.message)}}
 if(require.main===module&&process.env.CDS_PROCESS_SCHEDULER!=='off'){const interval=Math.max(60000,Number(process.env.CDS_PROCESS_SCHEDULER_MS||300000));setImmediate(runProcessRecurrenceScheduler);setInterval(runProcessRecurrenceScheduler,interval).unref()}
-if(require.main===module){app.listen(PORT,err=>{if(err){if(err.code==='EADDRINUSE'){console.error(`A porta ${PORT} já está em uso. Abra http://localhost:${PORT} — o servidor anterior continua no ar.`);process.exit(1)}console.error(err);process.exit(1)}console.log(`Escritório (contador): http://localhost:${PORT}/`);if(CLIENT_PORT>0&&CLIENT_PORT!==PORT){const clientSrv=app.listen(CLIENT_PORT,err2=>{if(err2){if(err2.code==='EADDRINUSE')console.error(`Portal do cliente: use http://localhost:${PORT}/portal/ (porta ${CLIENT_PORT} ocupada).`);else console.error(err2);return}markClientFrontPort(clientSrv.address().port);console.log(`Portal do cliente:     http://localhost:${CLIENT_PORT}/`);console.log(`(O escritório NÃO é o portal — use a porta ${PORT} para o contador.)`);})}else{console.log(`Portal do cliente:     http://localhost:${PORT}/portal/`)}if(process.env.CDS_COMMS_WORKER!=='off'){setInterval(()=>{comms.processDueJobs(10,'proc-'+process.pid).catch(()=>{})},2000).unref()}})}module.exports={app,db,config,documentStorage,documentAccess,documentIntelligence,accountingAIService,smartExpenseService,aiControlService,aiCredentialService,setAccountingAIProvider,refreshAccountingAIProvider,setAiCredentialTestConnection,sessions,emitEvent,EVENT_TYPES,setCnpjProvider,setCepProvider,setEmailProvider,setSmtpHooks,cnpjNorm,setWhatsAppProvider,processCommunicationJobs:(n,w)=>comms.processDueJobs(n,w),communicationEngine:comms,communicationService,origens,documentOwnership,markClientFrontPort,entryStates,postingService,validateAccountingSemantics,processService,exportService,accountingPeriodService,documentPipelineService,pushService,notificationService,chartParser,chartService};
+if(require.main===module){
+  const NETWORK_MODE=config.NETWORK_MODE||'local';
+  const HOST=listenHost(NETWORK_MODE);
+  const onListen=()=>{
+    if(NETWORK_MODE==='lan'){
+      console.log(formatLanBanner({port:PORT,clientPort:CLIENT_PORT,ips:listPrivateIPv4()}));
+    }else{
+      console.log(`Escritório (contador): http://localhost:${PORT}/`);
+      if(CLIENT_PORT>0&&CLIENT_PORT!==PORT){
+        console.log(`Portal do cliente:     http://localhost:${CLIENT_PORT}/`);
+        console.log(`(O escritório NÃO é o portal — use a porta ${PORT} para o contador.)`);
+      }else{
+        console.log(`Portal do cliente:     http://localhost:${PORT}/portal/`);
+      }
+    }
+  };
+  const startErr=(err)=>{
+    if(err){
+      if(err.code==='EADDRINUSE'){
+        console.error(`A porta ${PORT} já está em uso. Abra http://localhost:${PORT} — o servidor anterior continua no ar.`);
+        process.exit(1);
+      }
+      console.error(err);
+      process.exit(1);
+    }
+    onListen();
+    if(CLIENT_PORT>0&&CLIENT_PORT!==PORT){
+      const clientListen=HOST?app.listen(CLIENT_PORT,HOST,err2=>{
+        if(err2){
+          if(err2.code==='EADDRINUSE')console.error(`Portal do cliente: use http://localhost:${PORT}/portal/ (porta ${CLIENT_PORT} ocupada).`);
+          else console.error(err2);
+          return;
+        }
+        markClientFrontPort(clientListen.address().port);
+      }):app.listen(CLIENT_PORT,err2=>{
+        if(err2){
+          if(err2.code==='EADDRINUSE')console.error(`Portal do cliente: use http://localhost:${PORT}/portal/ (porta ${CLIENT_PORT} ocupada).`);
+          else console.error(err2);
+          return;
+        }
+        markClientFrontPort(clientListen.address().port);
+      });
+    }
+    if(process.env.CDS_COMMS_WORKER!=='off'){
+      setInterval(()=>{comms.processDueJobs(10,'proc-'+process.pid).catch(()=>{})},2000).unref();
+    }
+  };
+  if(HOST)app.listen(PORT,HOST,startErr);
+  else app.listen(PORT,startErr);
+}
+module.exports={app,db,config,documentStorage,documentAccess,documentIntelligence,accountingAIService,smartExpenseService,aiControlService,aiCredentialService,setAccountingAIProvider,refreshAccountingAIProvider,setAiCredentialTestConnection,sessions,emitEvent,EVENT_TYPES,setCnpjProvider,setCepProvider,setEmailProvider,setSmtpHooks,cnpjNorm,setWhatsAppProvider,processCommunicationJobs:(n,w)=>comms.processDueJobs(n,w),communicationEngine:comms,communicationService,origens,documentOwnership,markClientFrontPort,entryStates,postingService,validateAccountingSemantics,processService,exportService,accountingPeriodService,documentPipelineService,pushService,notificationService,chartParser,chartService};

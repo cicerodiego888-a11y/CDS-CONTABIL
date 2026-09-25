@@ -298,7 +298,7 @@ test('concorrência, recuperação PROCESSING e 1000 jobs paginados',async()=>{
 
 test('HTML do escritório possui Comunicações/WhatsApp',async()=>{
   const html=await fetch(base+'/').then(r=>r.text());
-  assert.match(html,/app\.js\?v=s39-5/);
+  assert.match(html,/app\.js\?v=s40-doc-preview/);
   const js=await fetch(base+'/assets/app.js?v=s13-15').then(r=>r.text());
   assert.match(js,/Comunicações/);
   assert.match(js,/\/comunicacoes\/config/);

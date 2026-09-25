@@ -272,8 +272,8 @@ test('8 concorrência básica: segundo confirm falha', async () => {
 
 test('9 UX login: Criar minha conta + página ativar + cache', async () => {
   const index = await fetch(base + '/').then(r => r.text());
-  assert.match(index, /app\.js\?v=s39-5/);
-  const js = await fetch(base + '/assets/app.js?v=s39-5').then(r => r.text());
+  assert.match(index, /app\.js\?v=s40-doc-preview/);
+  const js = await fetch(base + '/assets/app.js?v=s40-doc-preview').then(r => r.text());
   assert.match(js, /Criar minha conta/);
   assert.match(js, /\/api\/auth\/signup/);
   assert.doesNotMatch(js, /Solicitar acesso/);

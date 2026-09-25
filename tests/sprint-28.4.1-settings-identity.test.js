@@ -120,10 +120,10 @@ test('runtime frontend não usa teal como identidade', () => {
 test('cache bust s28-4-2 nos assets alterados', () => {
   const office = read('frontend/public/index.html');
   const portal = read('frontend/public/portal/index.html');
-  assert.match(office, /tokens\.css\?v=s28-4-2/);
-  assert.match(office, /theme\.css\?v=s39-5/);
+  assert.match(office, /tokens\.css\?v=s40-modal/);
+  assert.match(office, /theme\.css\?v=s40-doc-preview/);
   assert.match(office, /app\.css\?v=s36-2/);
-  assert.match(office, /app\.js\?v=s39-5/);
-  assert.match(portal, /portal\.css\?v=s28-4-2/);
-  assert.match(portal, /portal\.js\?v=s34/);
+  assert.match(office, /app\.js\?v=s40-doc-preview/);
+  assert.match(portal, /portal\.css\?v=s40-login/);
+  assert.match(portal, /portal\.js\?v=s40-login/);
 });

@@ -325,6 +325,6 @@ test('30 categoria + banco configurados retornam status completo',async()=>{
   assert.match(formSrc,/category_id|categories/);
   assert.match(js,/CONFIGURAÇÕES CONTÁBEIS/);
   assert.match(js,/Pesquisar conta analítica/);
-  assert.match(html,/app\.js\?v=s39-5/);
-  assert.match(portalHtml,/portal\.js\?v=s34/);
+  assert.match(html,/app\.js\?v=s40-doc-preview/);
+  assert.match(portalHtml,/portal\.js\?v=s40-login/);
 });

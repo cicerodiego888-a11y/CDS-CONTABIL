@@ -279,7 +279,10 @@ test('16 master key ausente em production com cofre falha', () => {
       DOCUMENT_ENCRYPTION_KEY: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
       AI_CREDENTIAL_ENCRYPTION_KEY: 'short',
       DEMO_MODE: 'false',
-      CDS_DB_PATH: path.join(tmp, 'prod.db')
+      CDS_DB_PATH: path.join(tmp, 'prod.db'),
+      CDS_OFFICE_PUBLIC_URL: 'https://app.example.com',
+      CDS_CORS_ORIGIN: 'https://app.example.com',
+      CLIENT_PORT: '0'
     }),
     /AI_CREDENTIAL_ENCRYPTION_KEY/
   );

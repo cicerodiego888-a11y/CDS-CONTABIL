@@ -158,7 +158,7 @@ test('frontend da central de documentos é responsivo e preserva ações', () =>
   assert.doesNotMatch(js, /Analisar documento/);
   assert.match(js, /Ver análise/);
   assert.match(js, /extractionFailureHelp/);
-  assert.match(js, /SEM OCR/);
+  assert.match(js, /SEM IA/);
   assert.match(js, /O que fazer/);
   assert.match(js, /Limpar filtros/);
   assert.match(js, /docs-table/);

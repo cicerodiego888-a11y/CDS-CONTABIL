@@ -1,0 +1,37 @@
+# CDS Contábil Connect — systemd (exemplo genérico)
+#
+# [CONFIGURAÇÃO DEPENDENTE DO PROVEDOR]
+# Ajuste User, WorkingDirectory e EnvironmentFile ao layout real do servidor.
+#
+# Instalação típica (como root/sudo):
+#   cp cds-contabil.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now cds-contabil
+
+[Unit]
+Description=CDS Contábil Connect
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cds
+Group=cds
+WorkingDirectory=/opt/cds-contabil/app
+EnvironmentFile=/opt/cds-contabil/.env
+ExecStart=/usr/bin/node backend/src/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# Sem privilégios desnecessários
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Logs via journald (ou redirecione se preferir arquivo)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cds-contabil
+
+[Install]
+WantedBy=multi-user.target

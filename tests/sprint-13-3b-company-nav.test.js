@@ -140,7 +140,7 @@ test('TEST 18 badges de classificação/aprovação/pendências continuam', () =
 test('organização oficial: grupos, Visão geral, chips alinhados e sem MOVIMENTAÇÕES no contexto', () => {
   assert.deepEqual(Object.keys(groups), ['OPERAÇÃO', 'CONTÁBIL', 'IMPORTAÇÃO', 'ACESSO']);
   assert.deepEqual(labelsOf(groups, 'OPERAÇÃO'), ['Visão geral', 'Despesas', 'Documentos', 'Solicitações']);
-  assert.deepEqual(labelsOf(groups, 'CONTÁBIL'), ['Classificação', 'Aprovação', 'Lançamentos', 'Fechamento Contábil', 'Integrações']);
+  assert.deepEqual(labelsOf(groups, 'CONTÁBIL'), ['Classificação', 'Lançamentos', 'Aprovação', 'Fechamento Contábil', 'Integrações']);
   assert.deepEqual(labelsOf(groups, 'IMPORTAÇÃO'), ['Importações']);
   assert.deepEqual(labelsOf(groups, 'ACESSO'), ['Usuários']);
   assert.doesNotMatch(ctxSrc, /MOVIMENTAÇÕES/);

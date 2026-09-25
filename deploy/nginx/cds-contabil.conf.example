@@ -1,0 +1,66 @@
+# CDS Contábil Connect — Nginx (exemplo genérico)
+
+# [CONFIGURAÇÃO DEPENDENTE DO PROVEDOR]
+# Substitua DOMINIO_REAL pelo hostname HTTPS oficial.
+# Instale o certificado TLS conforme o provedor (Let's Encrypt, painel, etc.).
+
+upstream cds_contabil_upstream {
+  server 127.0.0.1:3333;
+  keepalive 32;
+}
+
+server {
+  listen 80;
+  listen [::]:80;
+  server_name DOMINIO_REAL;
+
+  location /.well-known/acme-challenge/ {
+    root /var/www/certbot;
+  }
+
+  location / {
+    return 301 https://$host$request_uri;
+  }
+}
+
+server {
+  listen 443 ssl http2;
+  listen [::]:443 ssl http2;
+  server_name DOMINIO_REAL;
+
+  # [CONFIGURAÇÃO DEPENDENTE DO PROVEDOR] — caminhos do certificado
+  ssl_certificate     /etc/ssl/certs/DOMINIO_REAL.crt;
+  ssl_certificate_key /etc/ssl/private/DOMINIO_REAL.key;
+
+  # Segurança básica
+  add_header X-Content-Type-Options nosniff always;
+  add_header X-Frame-Options DENY always;
+  add_header Referrer-Policy no-referrer always;
+  add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+  # HSTS somente neste server HTTPS (não aplicar em :80)
+  add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+
+  # Nunca servir segredos / dados
+  location ~* /\.env {
+    deny all;
+    return 404;
+  }
+  location ~* ^/(database|backups|logs|uploads|exports)(/|$) {
+    deny all;
+    return 404;
+  }
+
+  client_max_body_size 25m;
+
+  location / {
+    proxy_pass http://cds_contabil_upstream;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header Connection "";
+    proxy_read_timeout 120s;
+  }
+}

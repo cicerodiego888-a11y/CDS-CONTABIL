@@ -127,7 +127,7 @@ test('8 POSTED não entra no count de Aprovação',async()=>{
 
 test('9 Classificação abre diretamente a fila',()=>{
   assert.match(classifSrc,/status:'NEEDS_CLASSIFICATION'/);
-  assert.match(classifSrc,/head\('Classificação','Movimentações que precisam de definição ou revisão contábil\.'\)/);
+  assert.match(classifSrc,/head\('Classificação','Movimentações que precisam de definição ou revisão contábil\.'/);
   assert.match(classifSrc,/Nenhuma movimentação aguardando classificação\./);
   assert.match(classifSrc,/A fila está em dia\./);
   assert.doesNotMatch(classifSrc,/Nada encontrado/);
@@ -143,7 +143,7 @@ test('10 Item NEEDS_CLASSIFICATION aparece diretamente em Classificação',async
 test('11 Não existe página intermediária Pendente Classificação',()=>{
   assert.doesNotMatch(js,/Pendente Classificação/);
   assert.ok(!ctxItems.some(x=>String(x[1]).includes('Pendente')));
-  assert.match(html,/app\.js\?v=s39-5/);
+  assert.match(html,/app\.js\?v=s40-doc-preview/);
 });
 
 test('12 Clique Classificar leva diretamente para a classificação',()=>{

@@ -89,10 +89,18 @@ test('produção recusa JWT fraco, chave documental curta e DEMO_MODE', () => {
     NODE_ENV: 'production', JWT_SECRET: 'strong-secret-16+', DOCUMENT_ENCRYPTION_KEY: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', DEMO_MODE: 'true', CDS_DB_PATH: path.join(tmp, 'p.db')
   }), /DEMO_MODE/);
   const ok = loadConfig({
-    NODE_ENV: 'production', JWT_SECRET: 'strong-production-secret', DOCUMENT_ENCRYPTION_KEY: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', DEMO_MODE: 'false', CDS_DB_PATH: 'official.db'
+    NODE_ENV: 'production',
+    JWT_SECRET: 'strong-production-secret',
+    DOCUMENT_ENCRYPTION_KEY: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+    DEMO_MODE: 'false',
+    CDS_DB_PATH: 'official.db',
+    CDS_OFFICE_PUBLIC_URL: 'https://app.example.com',
+    CDS_CORS_ORIGIN: 'https://app.example.com',
+    CLIENT_PORT: '0'
   });
   assert.equal(ok.CDS_DB_PATH, 'official.db');
   assert.equal(ok.DEMO_MODE, false);
+  assert.equal(ok.CLIENT_PORT, 0);
 });
 
 test('boot production sem JWT_SECRET falha com mensagem clara e sem vazamento', () => {

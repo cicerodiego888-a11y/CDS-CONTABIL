@@ -207,15 +207,15 @@ test('menu global usa Equipe e acessos, empresa mantém Usuários', () => {
 test('HTML aponta assets versionados no escritório e no Portal', () => {
   const admin = read('frontend/public/index.html');
   const portal = read('frontend/public/portal/index.html');
-  assert.match(admin, /app\.js\?v=s40-doc-preview/);
+  assert.match(admin, /app\.js\?v=s40-supplier/);
   assert.match(admin, /smart-expense\.js\?v=s36-draft/);
-  assert.match(admin, /theme\.css\?v=s40-doc-preview/);
+  assert.match(admin, /theme\.css\?v=s40-zoom/);
   assert.match(admin, /tokens\.css\?v=s40-modal/);
-  assert.match(admin, /document-viewer\.js\?v=s13-14/);
+  assert.match(admin, /document-viewer\.js\?v=s40-zoom/);
   assert.match(portal, /portal\.js\?v=s40-login/);
   assert.match(portal, /smart-expense\.js\?v=s36-draft/);
   assert.match(portal, /portal\.css\?v=s40-login/);
-  assert.match(portal, /document-viewer\.js\?v=s13-14/);
+  assert.match(portal, /document-viewer\.js\?v=s40-zoom/);
 });
 
 test('importação não pede JSON na conferência', () => {
