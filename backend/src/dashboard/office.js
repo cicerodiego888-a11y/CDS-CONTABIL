@@ -150,7 +150,7 @@ function sendOfficeDashboardInner(req, res, deps) {
   const pending = one(`SELECT COUNT(*) n FROM entries WHERE tenant_id=? AND status='PENDING'${companyFilter}`, ...p).n;
   const approved = one(`SELECT COUNT(*) n FROM entries WHERE tenant_id=? AND status='POSTED'${companyFilter}${dateFilter}`, ...p, ...datesLegacy).n;
   const rejected = one(`SELECT COUNT(*) n FROM entries WHERE tenant_id=? AND status='REJECTED'${companyFilter}${dateFilter}`, ...p, ...datesLegacy).n;
-  const documents = one(`SELECT COUNT(*) n FROM documents WHERE tenant_id=? AND deleted_at IS NULL${companyFilter}`, ...p).n;
+  const documents = one(`SELECT COUNT(*) n FROM documents WHERE tenant_id=? AND deleted_at IS NULL AND IFNULL(status,'')<>'DRAFT'${companyFilter}`, ...p).n;
   const expense_count = one(`SELECT COUNT(*) n FROM expenses WHERE tenant_id=?${companyFilter}`, ...p).n;
   const revenue_count = one(`SELECT COUNT(*) n FROM revenues WHERE tenant_id=?${companyFilter}`, ...p).n;
   const movements = expense_count + revenue_count;
@@ -186,7 +186,7 @@ function sendOfficeDashboardInner(req, res, deps) {
   );
 
   const documentsPeriod = one(
-    `SELECT COUNT(*) n FROM documents WHERE tenant_id=? AND deleted_at IS NULL${companyFilter}${dateCreated}`,
+    `SELECT COUNT(*) n FROM documents WHERE tenant_id=? AND deleted_at IS NULL AND IFNULL(status,'')<>'DRAFT'${companyFilter}${dateCreated}`,
     ...p, ...periodDates
   ).n;
   const docScope = cid ? { sql: ' AND d.company_id=?', p: [cid] } : visDoc;

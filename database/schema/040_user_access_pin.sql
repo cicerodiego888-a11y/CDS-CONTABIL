@@ -1,0 +1,2 @@
+-- Sprint 38: PIN de acesso 4 dígitos (hash por usuário)
+-- Colunas aplicadas também via ensureColumn em database.js

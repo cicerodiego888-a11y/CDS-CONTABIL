@@ -75,6 +75,13 @@ test('fluxo cliente→despesa→documento→classifica→aprova→POSTED→expor
   assert.equal(same.status, 422);
   assert.equal(same.data.error, 'SEMANTIC_INVALID');
 
+  const sameRec = await req('POST', '/api/lancamentos/' + exp.data.entry_id + '/reclassificar', {
+    reason: 'Contas iguais',
+    lines: [{ account_id: accD, side: 'D', amount_cents: 5000 }, { account_id: accD, side: 'C', amount_cents: 5000 }]
+  }, owner.token);
+  assert.equal(sameRec.status, 422, JSON.stringify(sameRec.data));
+  assert.equal(sameRec.data.error, 'SEMANTIC_INVALID');
+
   const rec = await req('POST', '/api/lancamentos/' + exp.data.entry_id + '/reclassificar', {
     reason: 'Classificação do contador',
     lines: [{ account_id: accD, side: 'D', amount_cents: 5000 }, { account_id: accC, side: 'C', amount_cents: 5000 }]

@@ -55,6 +55,7 @@
       onSaved,
       onClose,
       uploadUrl,
+      deleteUrl,
       analyzeUrl,
       reanalyzeUrl,
       saveUrl,
@@ -67,6 +68,17 @@
     let objectUrl = null;
     let analysis = null;
     let busy = false;
+    let closed = false;
+    let confirmed = false;
+    let opGen = 0;
+    let abortCtrl = null;
+
+    const resolveDeleteUrl = typeof deleteUrl === 'function'
+      ? deleteUrl
+      : (id) => {
+          if (mode === 'client') return '/api/client/documentos/' + id;
+          return '/api/documentos/' + id;
+        };
 
     const cats = (categories || []).filter(x =>
       !x.kind || x.kind === 'BOTH' || x.kind === 'EXPENSE'
@@ -157,14 +169,42 @@
 
     document.body.appendChild(root);
 
+    function isActive(gen) {
+      return !closed && gen === opGen;
+    }
+
+    function discardDraft(id) {
+      if (!id || confirmed) return;
+      try {
+        const p = api(resolveDeleteUrl(id), { method: 'DELETE' });
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch {}
+    }
+
     function close() {
+      if (closed) return;
+      closed = true;
+      opGen += 1;
+      // Abort in-flight analysis only. Do not abort upload: the server may still
+      // create the draft, and ingestFile discards it when !isActive(gen).
+      if (abortCtrl && documentId) {
+        try { abortCtrl.abort(); } catch {}
+        abortCtrl = null;
+      }
+      const discardId = confirmed ? null : documentId;
+      documentId = null;
+      documentMeta = null;
+      analysis = null;
       if (objectUrl) try { URL.revokeObjectURL(objectUrl); } catch {}
+      objectUrl = null;
       root.remove();
+      if (discardId) discardDraft(discardId);
       if (onClose) onClose();
     }
 
     function setBanner(text, kind) {
       const el = root.querySelector('#seBanner');
+      if (!el) return;
       el.className = 'se-banner' + (kind ? ' ' + kind : '');
       el.textContent = text;
     }
@@ -225,11 +265,13 @@
       } else if (data) {
         setBanner(data.banner || 'Preenchido automaticamente', 'ok');
       }
-      root.querySelector('#seReread').disabled = !documentId;
+      const reread = root.querySelector('#seReread');
+      if (reread) reread.disabled = !documentId;
     }
 
     function showPreview(file, meta) {
       const viewer = root.querySelector('#seViewer');
+      if (!viewer) return;
       if (objectUrl) try { URL.revokeObjectURL(objectUrl); } catch {}
       objectUrl = null;
       if (file) {
@@ -247,24 +289,33 @@
       }
     }
 
-    async function analyzeDocument(force) {
-      if (!documentId) return;
+    async function analyzeDocument(force, gen) {
+      if (!documentId || !isActive(gen)) return;
       setBanner(force ? 'Lendo documento novamente...' : 'Analisando documento...', 'busy');
-      root.querySelector('#seReread').disabled = true;
+      const reread = root.querySelector('#seReread');
+      if (reread) reread.disabled = true;
       try {
         const url = force ? reanalyzeUrl(documentId) : analyzeUrl(documentId);
-        const result = await api(url, { method: 'POST', body: JSON.stringify({ force: !!force }) });
+        const opts = { method: 'POST', body: JSON.stringify({ force: !!force }) };
+        if (abortCtrl) opts.signal = abortCtrl.signal;
+        const result = await api(url, opts);
+        if (!isActive(gen)) return;
         applyAnalysis(result.analysis || result);
       } catch (error) {
+        if (!isActive(gen)) return;
+        if (error && (error.name === 'AbortError' || error.code === 'ABORT_ERR')) return;
         setBanner('Não foi possível concluir a análise inteligente. Você pode revisar e preencher os dados manualmente.', 'warn');
         if (toast) toast(error.message || 'Falha na análise');
       } finally {
-        root.querySelector('#seReread').disabled = !documentId;
+        if (isActive(gen)) {
+          const btn = root.querySelector('#seReread');
+          if (btn) btn.disabled = !documentId;
+        }
       }
     }
 
     async function ingestFile(file) {
-      if (!file || busy) return;
+      if (!file || busy || closed) return;
       const ext = String(file.name || '').split('.').pop().toLowerCase();
       if (!['pdf', 'jpg', 'jpeg', 'png'].includes(ext)) {
         if (toast) toast('Formato não autorizado. Envie JPG, JPEG, PNG ou PDF.');
@@ -275,22 +326,44 @@
         if (toast) toast('Informe a empresa antes de anexar o documento.');
         return;
       }
+
+      const prevId = documentId;
+      documentId = null;
+      documentMeta = null;
+      if (prevId) discardDraft(prevId);
+
+      const gen = ++opGen;
+      if (abortCtrl) {
+        try { abortCtrl.abort(); } catch {}
+      }
+      abortCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+
       busy = true;
-      setBanner('Enviando documento...', 'busy');
+      setBanner('Anexando comprovante...', 'busy');
       try {
         const fd = new FormData();
         fd.append('file', file);
+        fd.append('draft', '1');
         if (mode === 'office') fd.append('company_id', company);
-        const uploaded = await api(uploadUrl, { method: 'POST', body: fd });
+        const opts = { method: 'POST', body: fd };
+        if (abortCtrl) opts.signal = abortCtrl.signal;
+        const uploaded = await api(uploadUrl, opts);
+        if (!isActive(gen)) {
+          if (uploaded && uploaded.id) discardDraft(uploaded.id);
+          return;
+        }
         documentId = uploaded.id;
         documentMeta = uploaded;
         showPreview(file, uploaded);
-        await analyzeDocument(false);
+        await analyzeDocument(false, gen);
       } catch (error) {
+        if (!isActive(gen)) return;
+        if (error && (error.name === 'AbortError' || error.code === 'ABORT_ERR')) return;
         setBanner('Não foi possível anexar o documento.', 'warn');
         if (toast) toast(error.message || 'Falha no upload');
       } finally {
-        busy = false;
+        if (isActive(gen)) busy = false;
+        else busy = false;
       }
     }
 
@@ -306,7 +379,11 @@
       drop.classList.remove('over');
       ingestFile(e.dataTransfer.files && e.dataTransfer.files[0]);
     };
-    root.querySelector('#seReread').onclick = () => analyzeDocument(true);
+    root.querySelector('#seReread').onclick = () => {
+      if (closed || !documentId) return;
+      const gen = opGen;
+      analyzeDocument(true, gen);
+    };
 
     if (mode === 'office' && companyId) {
       root.querySelector('#seCompanyId').value = companyId;
@@ -314,7 +391,7 @@
 
     root.querySelector('#seForm').onsubmit = async e => {
       e.preventDefault();
-      if (busy) return;
+      if (busy || closed) return;
       const form = new FormData(e.target);
       const description = String(form.get('description') || '').trim();
       const amount = String(form.get('amount') || '').trim();
@@ -325,6 +402,7 @@
         if (toast) toast('Preencha os campos obrigatórios.');
         return;
       }
+      const gen = opGen;
       busy = true;
       const btn = root.querySelector('#seSave');
       btn.disabled = true;
@@ -342,10 +420,14 @@
           document_id: documentId || null
         };
         await api(saveUrl, { method: 'POST', body: JSON.stringify(body) });
+        if (!isActive(gen)) return;
+        confirmed = true;
+        documentId = null;
         if (toast) toast('Despesa registrada com sucesso. Ela foi enviada para análise da contabilidade.', 'success');
         close();
         if (onSaved) await onSaved();
       } catch (error) {
+        if (!isActive(gen)) return;
         if (toast) toast(error.message || 'Não foi possível salvar a despesa.');
         btn.disabled = false;
         btn.textContent = 'Salvar despesa';

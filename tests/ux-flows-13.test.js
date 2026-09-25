@@ -9,16 +9,16 @@ const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
 test('tokens de modal e espaçamento existem', () => {
   const tokens = read('frontend/public/assets/tokens.css');
   const theme = read('frontend/public/assets/theme.css');
-  assert.match(tokens, /--modal-sm:\s*480px/);
-  assert.match(tokens, /--modal-md:\s*720px/);
-  assert.match(tokens, /--modal-lg:\s*960px/);
+  assert.match(tokens, /--modal-sm:\s*520px/);
+  assert.match(tokens, /--modal-md:\s*820px/);
+  assert.match(tokens, /--modal-lg:\s*1100px/);
   assert.match(tokens, /--space-1:\s*4px/);
   assert.match(tokens, /--space-8:\s*32px/);
   assert.match(theme, /\.modal-sm\{width:min\(var\(--modal-sm\),calc\(100vw - 48px\)\)\}/);
   assert.match(theme, /\.modal-md\{width:min\(var\(--modal-md\),calc\(100vw - 48px\)\)\}/);
   assert.match(theme, /\.modal-lg\{width:min\(var\(--modal-lg\),calc\(100vw - 48px\)\)/);
-  assert.match(theme, /overflow-y:auto/);
-  assert.match(theme, /max-height:min\(90vh/);
+  assert.match(theme, /\.modal-back\{[^}]*overflow-y:\s*auto/);
+  assert.match(theme, /\.modal-lg\{[^}]*height:\s*auto/);
 });
 
 test('formulário Nova empresa agrupa campos e usa modal grande', () => {
@@ -57,8 +57,8 @@ test('cabeçalho e rodapé sticky do modal de empresa', () => {
   assert.match(js, /Cadastrar empresa/);
   assert.match(js, /id="companySubmit"/);
   assert.match(theme, /\.modal-head\{[^}]*flex-shrink:0/);
-  assert.match(theme, /\.modal-body\{[^}]*overflow-y:auto/);
-  assert.match(theme, /\.modal-lg\{[^}]*height:min\(90vh/);
+  assert.match(theme, /\.modal-body\{[^}]*overflow:\s*visible/);
+  assert.match(theme, /\.modal-lg\{[^}]*height:\s*auto/);
   assert.match(theme, /\.modal-foot\{[^}]*flex-shrink:0/);
 });
 
@@ -177,8 +177,9 @@ test('modal de usuário tem header body footer e campos acessíveis', () => {
   const js = read('frontend/public/assets/app.js');
   const theme = read('frontend/public/assets/theme.css');
   assert.match(theme, /\.modal-head\{[^}]*flex-shrink:0/);
-  assert.match(theme, /\.modal-body\{[^}]*overflow-y:auto/);
+  assert.match(theme, /\.modal-body\{[^}]*overflow:\s*visible/);
   assert.match(theme, /\.modal-body\{[^}]*flex:1 1 auto/);
+  assert.match(theme, /\.modal-back\{[^}]*overflow-y:\s*auto/);
   assert.match(theme, /\.modal-foot\{[^}]*flex-shrink:0/);
   assert.match(js, /id="clientUserForm"/);
   assert.match(js, /id="uForm"/);
@@ -206,14 +207,14 @@ test('menu global usa Equipe e acessos, empresa mantém Usuários', () => {
 test('HTML aponta assets versionados no escritório e no Portal', () => {
   const admin = read('frontend/public/index.html');
   const portal = read('frontend/public/portal/index.html');
-  assert.match(admin, /app\.js\?v=s28-4-2/);
-  assert.match(admin, /smart-expense\.js\?v=s25-1/);
-  assert.match(admin, /theme\.css\?v=s28-4-2/);
-  assert.match(admin, /tokens\.css\?v=s28-4-2/);
+  assert.match(admin, /app\.js\?v=s40-doc-preview/);
+  assert.match(admin, /smart-expense\.js\?v=s36-draft/);
+  assert.match(admin, /theme\.css\?v=s40-doc-preview/);
+  assert.match(admin, /tokens\.css\?v=s40-modal/);
   assert.match(admin, /document-viewer\.js\?v=s13-14/);
-  assert.match(portal, /portal\.js\?v=s28-4-2/);
-  assert.match(portal, /smart-expense\.js\?v=s25-1/);
-  assert.match(portal, /portal\.css\?v=s28-4-2/);
+  assert.match(portal, /portal\.js\?v=s40-login/);
+  assert.match(portal, /smart-expense\.js\?v=s36-draft/);
+  assert.match(portal, /portal\.css\?v=s40-login/);
   assert.match(portal, /document-viewer\.js\?v=s13-14/);
 });
 
@@ -251,10 +252,27 @@ test('configurações contábeis têm ajuda contextual no círculo de interroga�
   const theme = read('frontend/public/assets/theme.css');
   assert.match(js, /data-screen-help/);
   assert.match(js, /function helpCircle/);
-  assert.match(js, /Como funciona: Bancos/);
-  assert.match(js, /Como funciona: Categorias/);
-  assert.match(js, /Como funciona: Regras Contábeis/);
-  assert.match(js, /Como funciona: Plano de Contas/);
+  for (const title of [
+    'Como funciona: Bancos',
+    'Como funciona: Categorias',
+    'Como funciona: Regras Contábeis',
+    'Como funciona: Plano de Contas',
+    'Como funciona: Exportações',
+    'Como funciona: Fechamento Contábil',
+    'Como funciona: Empresas',
+    'Como funciona: Classificação',
+    'Como funciona: Aprovação',
+    'Como funciona: Documentos',
+    'Como funciona: Importações',
+    'Como funciona: Comunicações',
+    'Como funciona: Inteligência Artificial',
+    'Como funciona: Configurações'
+  ]) {
+    assert.match(js, new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.match(js, /head\('Exportações'[^)]*'exportacoes'\)/);
+  assert.match(js, /head\('Fechamento Contábil'[^)]*'fechamento'\)/);
+  assert.match(js, /head\('Classificação'[^)]*'','classificacao'\)/);
   assert.match(js, /modalHead\(editing\?\(cat\?'Editar categoria':'Editar banco'\):\(cat\?'Nova categoria':'Banco'\),cat\?'Vincule a categoria a uma conta analítica.':'Vincule o banco a uma conta analítica do plano.',endpoint\)/);
   assert.match(js, /modalHead\('Nova regra contábil','Condições e contas da partida automática\.','regras'\)/);
   assert.match(js, /modalHead\('Importar plano de contas','PDF, CSV ou TXT\. Confira a prévia antes de gravar\.','plano'\)/);
@@ -265,10 +283,15 @@ test('configurações contábeis têm ajuda contextual no círculo de interroga�
 
 test('fila de aprovação permite revisar o lançamento no modal', () => {
   const js = read('frontend/public/assets/app.js');
+  const theme = read('frontend/public/assets/theme.css');
   assert.match(js, /async function approval/);
   assert.match(js, /async function reviewApproval/);
   assert.match(js, /Revisar →/);
   assert.match(js, /async function viewEntry/);
   assert.match(js, /Detalhes do lançamento/);
   assert.match(js, /function nLinesHtml/);
+  assert.match(js, /entry-doc-preview/);
+  assert.match(js, /function bindEntryDoc/);
+  assert.match(js, /Carregando pré-visualização/);
+  assert.match(theme, /\.entry-doc-preview\{/);
 });

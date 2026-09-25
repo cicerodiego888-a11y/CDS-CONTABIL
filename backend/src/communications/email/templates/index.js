@@ -27,7 +27,7 @@ function passwordReset(vars){
   const text=[
     'Olá, '+who+'.',
     '',
-    'O escritório contábil solicitou a redefinição do seu acesso',
+    'Recebemos uma solicitação de redefinição do seu acesso',
     'ao CDS Contábil Connect.',
     '',
     'Clique no link abaixo para criar uma nova senha.',
@@ -37,19 +37,19 @@ function passwordReset(vars){
     'Este link é individual, possui validade limitada e pode ser',
     'utilizado uma única vez.',
     '',
-    'Se você não esperava este e-mail, entre em contato com seu',
-    'escritório contábil.',
+    'Se você não solicitou esta redefinição, ignore este e-mail',
+    'ou fale com seu escritório contábil.',
     '',
     'CDS Contábil Connect'
   ].join('\n');
   const html=wrapHtml(
     `<h1 style="margin:0 0 16px;font-size:22px">Redefinição de acesso</h1>
     <p style="margin:0 0 12px;line-height:1.5">Olá, ${escapeHtml(who)}.</p>
-    <p style="margin:0 0 20px;line-height:1.5">O escritório contábil solicitou a redefinição do seu acesso ao CDS Contábil Connect.</p>
+    <p style="margin:0 0 20px;line-height:1.5">Recebemos uma solicitação de redefinição do seu acesso ao CDS Contábil Connect.</p>
     <p style="margin:0 0 16px"><a href="${escapeHtml(link)}" style="display:inline-block;background:#0f5f59;color:#fff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:650" target="_blank" rel="noopener noreferrer">Criar nova senha</a></p>
     <p style="margin:0 0 20px;font-size:13px;line-height:1.5;word-break:break-all">Se o botão não abrir, use este link:<br><a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link)}</a></p>
     <p style="margin:0 0 12px;font-size:13px;color:#5b6d73;line-height:1.5">Este link é individual, possui validade limitada e pode ser utilizado uma única vez.</p>
-    <p style="margin:0;font-size:13px;color:#5b6d73;line-height:1.5">Se você não esperava este e-mail, entre em contato com seu escritório contábil.</p>
+    <p style="margin:0;font-size:13px;color:#5b6d73;line-height:1.5">Se você não solicitou esta redefinição, ignore este e-mail ou fale com seu escritório contábil.</p>
     <p style="margin:16px 0 0;font-size:13px;color:#5b6d73">CDS Contábil Connect</p>`,
     vars.branding
   );
@@ -84,10 +84,42 @@ function render(templateKey,vars){
   const key=String(templateKey||'generic-notification');
   if(key==='user-invite'||key==='USER_INVITE'||key==='USER_INVITE_RESEND')return userInvite(vars||{});
   if(key==='password-reset'||key==='PASSWORD_RESET')return passwordReset(vars||{});
+  if(key==='office-signup'||key==='OFFICE_SIGNUP')return officeSignup(vars||{});
   if(key==='document-received'||key==='DOCUMENT_UPLOADED')return documentReceived(vars||{});
   if(key==='expense-received'||key==='EXPENSE_CREATED')return expenseReceived(vars||{});
   if(key==='EMAIL_TEST'||key==='email-test')return testEmail({to:(vars&&vars.to)||''});
   return genericNotification(vars||{});
 }
 
-module.exports={render,userInvite,passwordReset,documentReceived,expenseReceived,genericNotification,testEmail,invitationEmail};
+function officeSignup(vars){
+  const who=String(vars.name||'olá').trim()||'olá';
+  const office=String(vars.office_name||'seu escritório').trim();
+  const link=String(vars.url||'').trim();
+  const text=[
+    'Olá, '+who+'.',
+    '',
+    'Recebemos o cadastro do escritório '+office+' no CDS Contábil Connect.',
+    '',
+    'Clique no link abaixo para confirmar o e-mail e ativar sua conta.',
+    '',
+    link,
+    '',
+    'Este link é individual, possui validade limitada e pode ser utilizado uma única vez.',
+    '',
+    'Se você não solicitou este cadastro, ignore este e-mail.',
+    '',
+    'CDS Contábil Connect'
+  ].join('\n');
+  const html=wrapHtml(
+    `<h1 style="margin:0 0 16px;font-size:22px">Confirme seu e-mail</h1>
+    <p style="margin:0 0 12px;line-height:1.5">Olá, ${escapeHtml(who)}.</p>
+    <p style="margin:0 0 20px;line-height:1.5">Recebemos o cadastro do escritório <b>${escapeHtml(office)}</b> no CDS Contábil Connect.</p>
+    <p style="margin:0 0 16px"><a href="${escapeHtml(link)}" style="display:inline-block;background:#0f5f59;color:#fff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:650" target="_blank" rel="noopener noreferrer">Confirmar e-mail e ativar conta</a></p>
+    <p style="margin:0 0 20px;font-size:13px;line-height:1.5;word-break:break-all">Se o botão não abrir, use este link:<br><a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link)}</a></p>
+    <p style="margin:0;font-size:13px;color:#5b6d73;line-height:1.5">Este link é individual, possui validade limitada e pode ser utilizado uma única vez.</p>`,
+    vars.branding
+  );
+  return {subject:'Confirme seu cadastro — CDS Contábil Connect',text,html};
+}
+
+module.exports={render,userInvite,passwordReset,officeSignup,documentReceived,expenseReceived,genericNotification,testEmail,invitationEmail};

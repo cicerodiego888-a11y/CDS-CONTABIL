@@ -1,9 +1,12 @@
 'use strict';
 
 const HEADER_RE = /c[oó]digo\s+classifica[cç][aã]o\s+descri[cç][aã]o/i;
+const HEADER_COMPACT_RE = /c[oó]digoclassifica[cç][aã]odescri[cç][aã]o/i;
 const PAGE_RE = /^\d+\s*\/\s*\d+$/;
 const LEGACY_RE = /^\s*(\d+)\s+(\d{4,})\s+([SA])\s+(.+?)\s*$/i;
 const CODE_CLASS_DESC_RE = /^\s*(\d+)\s+(\d+)\s+(\S.*)$/;
+/** Real Domínio/Audácia pdf-parse output: digits immediately followed by description. */
+const GLUED_ACCOUNT_RE = /^(\d+)(\D.+)$/;
 
 function PlanPreviewError(message, code, stage, fileType, http) {
   const err = new Error(message);
@@ -28,11 +31,28 @@ function normalizeChartText(text) {
     .trim();
 }
 
+function compactHeaderKey(line) {
+  return String(line || '').replace(/\s+/g, '');
+}
+
+function isChartHeaderLine(line) {
+  const s = String(line || '').trim();
+  if (!s) return false;
+  if (HEADER_RE.test(s)) return true;
+  return HEADER_COMPACT_RE.test(compactHeaderKey(s));
+}
+
+function hasChartHeader(text) {
+  const normalized = String(text || '');
+  if (HEADER_RE.test(normalized)) return true;
+  return HEADER_COMPACT_RE.test(compactHeaderKey(normalized));
+}
+
 function isStructuralLine(line) {
   const s = String(line || '').trim();
   if (!s) return true;
   if (PAGE_RE.test(s)) return true;
-  if (HEADER_RE.test(s)) return true;
+  if (isChartHeaderLine(s)) return true;
   if (/^p[aá]gina\s*:/i.test(s)) return true;
   if (/^emiss[aã]o\s*:/i.test(s)) return true;
   if (/^hora\s*:/i.test(s)) return true;
@@ -40,15 +60,30 @@ function isStructuralLine(line) {
   if (/^empresa\s*:/i.test(s)) return true;
   if (/^c\.?\s*n\.?\s*p\.?\s*j\.?\s*:/i.test(s)) return true;
   if (/^cnpj\s*:/i.test(s)) return true;
+  if (/c\.?\s*n\.?\s*p\.?\s*j\.?\s*:/i.test(s) && /[\d.\/\-]{14,}/.test(s)) return true;
+  if (/^total de itens listados/i.test(s)) return true;
+  if (!/^\d/.test(s) && /empreendimentos|ltda\b/i.test(s)) return true;
   return false;
 }
 
 function extractReportMeta(text) {
   const raw = String(text || '');
-  const company = raw.match(/empresa\s*:\s*(.+)/i);
-  const cnpj = raw.match(/c\.?\s*n\.?\s*p\.?\s*j\.?\s*:\s*([\d.\-\/]+)/i) || raw.match(/cnpj\s*:\s*([\d.\-\/]+)/i);
+  // Only horizontal whitespace after ':' — do not let \s eat the next line.
+  const companyInline = raw.match(/empresa[ \t]*:[ \t]*([^\n\r]+)/i);
+  let company_name = companyInline ? companyInline[1].replace(/\s+/g, ' ').trim() : null;
+  if (company_name && (/^c\.?\s*n\.?\s*p\.?\s*j/i.test(company_name) || company_name.length < 3 || /^[\d.\-\/]+$/.test(company_name))) {
+    company_name = null;
+  }
+  if (!company_name) {
+    const beforeEmpresa = raw.match(/^([A-ZÀ-Ú][^\n]{2,100})\r?\nEmpresa[ \t]*:/im);
+    if (beforeEmpresa) company_name = beforeEmpresa[1].replace(/\s+/g, ' ').trim();
+  }
+  const cnpj =
+    raw.match(/c\.?\s*n\.?\s*p\.?\s*j\.?\s*:[ \t]*([\d.\-\/]+)/i) ||
+    raw.match(/([\d.\-\/]{14,})[ \t]*c\.?\s*n\.?\s*p\.?\s*j\.?\s*:/i) ||
+    raw.match(/cnpj[ \t]*:[ \t]*([\d.\-\/]+)/i);
   return {
-    company_name: company ? company[1].replace(/\s+/g, ' ').trim() : null,
+    company_name: company_name || null,
     company_cnpj: cnpj ? cnpj[1].trim() : null
   };
 }
@@ -86,7 +121,7 @@ function parseDelimited(text) {
 function looksDelimited(text) {
   const first = String(text || '').split(/\r?\n/).map((x) => x.trim()).find(Boolean) || '';
   if (!first) return false;
-  if (HEADER_RE.test(first)) return false;
+  if (isChartHeaderLine(first)) return false;
   const h = normHeader(first);
   if (h.includes('codigo') && (h.includes('classificacao') || h.includes('descricao'))) return first.includes(';') || first.includes(',');
   return /[;,]/.test(first) && !/^empresa\s*:/i.test(first);
@@ -216,31 +251,126 @@ function parseCodeClassDescLine(line) {
   return { codigo: m[1], classificacao: m[2], descricao: m[3] };
 }
 
+/**
+ * Score a code|classification split for Domínio glued lines.
+ * Relatório is ordered by classification; prefer child extensions of prevCls.
+ */
+function scoreGluedSplit(code, cls, prevCls, usedCodes) {
+  if (!code || !cls) return -Infinity;
+  if (code[0] === '0' || cls[0] === '0') return -Infinity;
+  if (usedCodes.has(code)) return -Infinity;
+
+  let s = 0;
+  if (prevCls) {
+    let i = 0;
+    while (i < cls.length && i < prevCls.length && cls[i] === prevCls[i]) i++;
+    s += i * 4;
+
+    const isChild = cls.startsWith(prevCls) && cls.length > prevCls.length;
+    const isSame = cls === prevCls;
+    if (isChild) s += 80;
+    else if (isSame) s += 30;
+    else if (prevCls.startsWith(cls)) s += 8;
+    else s += i * 2;
+
+    if (!isSame && cls.length === prevCls.length && i === cls.length - 1 && i > 0) {
+      s += 25;
+    }
+  } else {
+    s += (5 - Math.min(code.length, 5)) + (5 - Math.min(cls.length, 5));
+  }
+
+  if (cls.length >= code.length) s += 2;
+  if (code.length <= 4) s += 1;
+  s += Math.min(cls.length, 12) * 0.01;
+  s -= code.length * 0.001;
+  return s;
+}
+
+/**
+ * Split glued digit prefix into código + classificação using previous
+ * classification context (report order). Returns null if unsafe.
+ */
+function parseGluedAccount(digits, descricao, prevCls, usedCodes) {
+  const desc = String(descricao || '').trim();
+  const d = String(digits || '');
+  if (!d || !desc || d.length < 2) return null;
+
+  const candidates = [];
+  for (let i = 1; i < d.length; i++) {
+    const code = d.slice(0, i);
+    const cls = d.slice(i);
+    const score = scoreGluedSplit(code, cls, prevCls, usedCodes);
+    if (Number.isFinite(score)) {
+      candidates.push({ codigo: code, classificacao: cls, descricao: desc, score });
+    }
+  }
+
+  if (prevCls) {
+    const hasChild = candidates.some(
+      (c) => c.classificacao.startsWith(prevCls) && c.classificacao.length > prevCls.length
+    );
+    if (hasChild) {
+      for (let i = candidates.length - 1; i >= 0; i--) {
+        if (candidates[i].classificacao === prevCls) candidates.splice(i, 1);
+      }
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  const best = candidates[0];
+  if (!best) return null;
+  return { codigo: best.codigo, classificacao: best.classificacao, descricao: best.descricao };
+}
+
 function parseChartText(text) {
   const normalized = normalizeChartText(text);
   const meta = extractReportMeta(normalized);
-  const header = HEADER_RE.test(normalized);
+  const header = hasChartHeader(normalized);
   const rows = [];
   const skipped = [];
   let format = header ? 'CODE_CLASS_DESC' : null;
   let legacyHits = 0;
   let relacaoHits = 0;
+  const usedCodes = new Set();
+  let prevCls = '';
+
   for (const line of normalized.split('\n')) {
     if (isStructuralLine(line)) continue;
+
     const legacy = parseLegacyLine(line);
     if (legacy) {
       rows.push(legacy);
       legacyHits++;
+      if (legacy.codigo) usedCodes.add(String(legacy.codigo));
+      if (legacy.classificacao) prevCls = String(legacy.classificacao);
       continue;
     }
-    const rel = parseCodeClassDescLine(line);
-    if (rel) {
-      rows.push(rel);
+
+    const spaced = parseCodeClassDescLine(line);
+    if (spaced) {
+      rows.push(spaced);
       relacaoHits++;
+      if (spaced.codigo) usedCodes.add(String(spaced.codigo));
+      if (spaced.classificacao) prevCls = String(spaced.classificacao);
       continue;
     }
+
+    const gluedMatch = line.match(GLUED_ACCOUNT_RE);
+    if (gluedMatch) {
+      const glued = parseGluedAccount(gluedMatch[1], gluedMatch[2], prevCls, usedCodes);
+      if (glued) {
+        rows.push(glued);
+        relacaoHits++;
+        usedCodes.add(String(glued.codigo));
+        prevCls = String(glued.classificacao);
+        continue;
+      }
+    }
+
     skipped.push(line);
   }
+
   if (!format) format = legacyHits >= relacaoHits && legacyHits ? 'CODE_CLASS_TYPE_DESC' : 'CODE_CLASS_DESC';
   return { rows, skipped, format, header, meta, text: normalized };
 }
@@ -303,15 +433,20 @@ module.exports = {
   PlanPreviewError,
   normalizeChartText,
   isStructuralLine,
+  isChartHeaderLine,
+  hasChartHeader,
   extractReportMeta,
   parseDelimited,
   parseChartText,
   parsePlanSource,
   parsePdfText,
+  parseGluedAccount,
   normalizeAccount,
   inferHierarchy,
   validateChartAccounts,
   buildPreview,
   publicAccount,
-  HEADER_RE
+  HEADER_RE,
+  HEADER_COMPACT_RE,
+  GLUED_ACCOUNT_RE
 };

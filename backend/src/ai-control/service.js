@@ -1,5 +1,12 @@
 'use strict';
 
+const {
+  MODES: AUTONOMY_MODES,
+  LABELS: AUTONOMY_LABELS,
+  normalizeAutonomyMode,
+  resolveAutonomyPolicy
+} = require('./autonomy-policy');
+
 const OPERATIONS = Object.freeze({
   ACCOUNT_CLASSIFICATION: 'ACCOUNT_CLASSIFICATION',
   DOCUMENT_INTERPRETATION: 'DOCUMENT_INTERPRETATION',
@@ -12,6 +19,7 @@ const OPERATIONS = Object.freeze({
 
 const DEFAULT_MODEL_ID = 'gpt-5.6-terra';
 const DEFAULT_MODEL_DISPLAY = 'GPT-5.6 Terra';
+const DEFAULT_AUTONOMY_MODE = AUTONOMY_MODES.ASSISTED_50;
 
 function normalizeOperation(value) {
   const raw = String(value || '').trim().toUpperCase();
@@ -54,9 +62,9 @@ function createAiControlService({ db, id, auditSystem, config, credentialService
     // tenant_ai_settings.enabled = decisão do escritório (sempre inicia desativado).
     // AI_ENABLED / AI_PROVIDER = capacidade técnica da instalação — não misturar.
     run(
-      `INSERT INTO tenant_ai_settings(tenant_id,enabled,model_display,updated_at)
-       VALUES(?,?,?,CURRENT_TIMESTAMP)`,
-      tenantId, 0, DEFAULT_MODEL_DISPLAY
+      `INSERT INTO tenant_ai_settings(tenant_id,enabled,model_display,autonomy_mode,updated_at)
+       VALUES(?,?,?,?,CURRENT_TIMESTAMP)`,
+      tenantId, 0, DEFAULT_MODEL_DISPLAY, DEFAULT_AUTONOMY_MODE
     );
     return one('SELECT * FROM tenant_ai_settings WHERE tenant_id=?', tenantId);
   }
@@ -204,6 +212,8 @@ function createAiControlService({ db, id, auditSystem, config, credentialService
     const limitReached = !!(limit && limit > 0 && usage.cost_cents >= limit);
     const displayModel = row.model_display || DEFAULT_MODEL_DISPLAY;
     const providerModel = canonicalModel();
+    const autonomyMode = normalizeAutonomyMode(row.autonomy_mode) || DEFAULT_AUTONOMY_MODE;
+    const autonomy = resolveAutonomyPolicy(autonomyMode);
     return {
       enabled,
       status: enabled ? 'ATIVA' : 'DESATIVADA',
@@ -219,6 +229,13 @@ function createAiControlService({ db, id, auditSystem, config, credentialService
       last_test_status: cred.last_test_status || null,
       monthly_limit_cents: limit,
       monthly_limit_usd: limit == null ? null : Number((limit / 100).toFixed(2)),
+      autonomy_mode: autonomy.mode,
+      autonomy_percent: autonomy.percent,
+      autonomy_label: autonomy.label,
+      autonomy_options: [
+        { value: AUTONOMY_MODES.ASSISTED_50, label: AUTONOMY_LABELS.ASSISTED_50, percent: 50 },
+        { value: AUTONOMY_MODES.AUTONOMOUS_98, label: AUTONOMY_LABELS.AUTONOMOUS_98, percent: 98 }
+      ],
       usage: {
         period_ym: usage.period_ym,
         cost_cents: usage.cost_cents,
@@ -263,14 +280,33 @@ function createAiControlService({ db, id, auditSystem, config, credentialService
       ? String(input.model_display).trim().slice(0, 80) || DEFAULT_MODEL_DISPLAY
       : (before.model_display || DEFAULT_MODEL_DISPLAY);
 
+    let autonomyMode = before.autonomy_mode || DEFAULT_AUTONOMY_MODE;
+    if (input.autonomy_mode !== undefined || input.autonomy !== undefined ||
+        input.autonomy_percent !== undefined) {
+      const raw = input.autonomy_mode !== undefined ? input.autonomy_mode
+        : (input.autonomy !== undefined ? input.autonomy : input.autonomy_percent);
+      const normalized = normalizeAutonomyMode(raw);
+      if (!normalized) {
+        throw fail(
+          'Autonomia inválida. Use 50% (Assistida) ou 98% (Autônoma).',
+          'INVALID_AUTONOMY_MODE'
+        );
+      }
+      autonomyMode = normalized;
+    }
+
     run(
       `UPDATE tenant_ai_settings SET enabled=?,monthly_limit_cents=?,model_display=?,
-       updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=?`,
-      enabled ? 1 : 0, limit, modelDisplay, userId || null, tenantId
+       autonomy_mode=?,updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=?`,
+      enabled ? 1 : 0, limit, modelDisplay, autonomyMode, userId || null, tenantId
     );
 
     audit(tenantId, userId, 'AI_SETTINGS_CHANGED', 'AI_SETTINGS', tenantId, {
-      enabled, monthly_limit_cents: limit, model_display: modelDisplay
+      enabled,
+      monthly_limit_cents: limit,
+      model_display: modelDisplay,
+      autonomy_mode: autonomyMode,
+      before_autonomy_mode: before.autonomy_mode || DEFAULT_AUTONOMY_MODE
     });
     if (before.enabled !== enabled) {
       audit(tenantId, userId, enabled ? 'AI_ENABLED' : 'AI_DISABLED', 'AI_SETTINGS', tenantId, {
@@ -282,7 +318,20 @@ function createAiControlService({ db, id, auditSystem, config, credentialService
         before: before.monthly_limit_cents, after: limit
       });
     }
+    if ((before.autonomy_mode || DEFAULT_AUTONOMY_MODE) !== autonomyMode) {
+      audit(tenantId, userId, 'AI_AUTONOMY_CHANGED', 'AI_SETTINGS', tenantId, {
+        before: before.autonomy_mode || DEFAULT_AUTONOMY_MODE,
+        after: autonomyMode,
+        before_percent: resolveAutonomyPolicy(before.autonomy_mode).percent,
+        after_percent: resolveAutonomyPolicy(autonomyMode).percent
+      });
+    }
     return publicSettings(tenantId);
+  }
+
+  function getAutonomyPolicy(tenantId) {
+    const settings = publicSettings(tenantId);
+    return resolveAutonomyPolicy(settings.autonomy_mode);
   }
 
   function availability(tenantId) {
@@ -463,8 +512,11 @@ function createAiControlService({ db, id, auditSystem, config, credentialService
     OPERATIONS,
     DEFAULT_MODEL_ID,
     DEFAULT_MODEL_DISPLAY,
+    DEFAULT_AUTONOMY_MODE,
+    AUTONOMY_MODES,
     getSettings: publicSettings,
     updateSettings,
+    getAutonomyPolicy,
     availability,
     recordUsage,
     estimateCostCents,
@@ -483,6 +535,8 @@ module.exports = {
   OPERATIONS,
   DEFAULT_MODEL_ID,
   DEFAULT_MODEL_DISPLAY,
+  DEFAULT_AUTONOMY_MODE,
+  AUTONOMY_MODES,
   normalizeOperation,
   periodYm,
   monthBounds

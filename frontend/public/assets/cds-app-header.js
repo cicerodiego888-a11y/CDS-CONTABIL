@@ -22,7 +22,7 @@
 
   function notifHtml(unread) {
     const n = Number(unread || 0) || 0;
-    return `<div class="notif-wrap" id="notifWrap"><button type="button" class="icon-button notif-bell" id="notifToggle" aria-label="${n ? `Notificações (${n})` : 'Notificações'}">${bellSvg()}${n ? `<span class="notif-badge" id="notifBadge">${n}</span>` : '<span class="notif-badge" id="notifBadge" hidden></span>'}</button><div class="notif-panel" id="notifPanel" hidden><div class="notif-head"><strong id="notifLabel">Notificações${n ? ` (${n})` : ''}</strong><button type="button" class="btn secondary" id="notifReadAll">Marcar todas</button></div><div id="notifList" class="notif-list"><div class="empty-state"><h3>Carregando avisos</h3><p>Buscando notificações.</p></div></div></div></div>`;
+    return `<div class="notif-wrap" id="notifWrap"><button type="button" class="icon-button notif-bell" id="notifToggle" aria-label="${n ? `Notificações (${n})` : 'Notificações'}">${bellSvg()}${n ? `<span class="notif-badge" id="notifBadge">${n}</span>` : '<span class="notif-badge" id="notifBadge" hidden></span>'}</button><div class="notif-panel" id="notifPanel" hidden><div class="notif-head"><strong id="notifLabel">Notificações${n ? ` (${n})` : ''}</strong><div class="notif-head-actions"><button type="button" class="btn secondary" id="notifHistory">Histórico</button><button type="button" class="btn secondary" id="notifReadAll">Marcar todas</button></div></div><div id="notifList" class="notif-list"><div class="empty-state"><h3>Carregando avisos</h3><p>Buscando notificações.</p></div></div></div></div>`;
   }
 
   /**
@@ -54,5 +54,78 @@
     </header>`;
   }
 
+  const OVERLAY_SEL = '.more-menu,.user-dropdown,.notif-panel';
+
+  function hideOverlayMenus(except) {
+    document.querySelectorAll(OVERLAY_SEL).forEach((menu) => {
+      if (except && menu === except) return;
+      menu.hidden = true;
+      menu.classList.remove('overlay-menu-open');
+      menu.style.top = '';
+      menu.style.left = '';
+      menu.style.right = '';
+    });
+    if (!except) {
+      document.querySelectorAll('#userMenuBtn,#notifToggle,.more-btn').forEach((btn) => {
+        if (btn.setAttribute) btn.setAttribute('aria-expanded', 'false');
+      });
+    }
+  }
+
+  function placeOverlayMenu(btn, menu) {
+    if (!btn || !menu) return;
+    hideOverlayMenus(menu);
+    menu.hidden = false;
+    menu.classList.add('overlay-menu-open');
+    const r = btn.getBoundingClientRect();
+    const mw = Math.max(menu.offsetWidth || 180, menu.classList.contains('notif-panel') ? 320 : 180);
+    const mh = menu.offsetHeight || 160;
+    let left = r.right - mw;
+    if (left < 8) left = 8;
+    if (left + mw > window.innerWidth - 8) left = Math.max(8, window.innerWidth - mw - 8);
+    let top = r.bottom + 6;
+    if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 6);
+    menu.style.top = top + 'px';
+    menu.style.left = left + 'px';
+    menu.style.right = 'auto';
+  }
+
+  function toggleOverlayMenu(btn, menu, onOpen) {
+    if (!btn || !menu) return;
+    const willOpen = menu.hidden;
+    hideOverlayMenus();
+    if (!willOpen) {
+      if (btn.setAttribute) btn.setAttribute('aria-expanded', 'false');
+      return;
+    }
+    placeOverlayMenu(btn, menu);
+    if (btn.setAttribute) btn.setAttribute('aria-expanded', 'true');
+    if (typeof onOpen === 'function') onOpen();
+  }
+
+  function bindKebabMenus(scope) {
+    const root = scope || document;
+    root.querySelectorAll('.more-btn').forEach((btn) => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const menu = btn.parentElement && btn.parentElement.querySelector('.more-menu');
+        toggleOverlayMenu(btn, menu);
+      };
+    });
+    root.querySelectorAll('.more-menu,.user-dropdown,.notif-panel').forEach((menu) => {
+      menu.onclick = (e) => e.stopPropagation();
+    });
+    if (!global.__cdsOverlayBound) {
+      global.__cdsOverlayBound = true;
+      document.addEventListener('click', () => hideOverlayMenus());
+      window.addEventListener('scroll', () => hideOverlayMenus(), true);
+      window.addEventListener('resize', () => hideOverlayMenus());
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') hideOverlayMenus();
+      });
+    }
+  }
+
   global.CdsAppHeader = { render, notifHtml, initials, esc };
+  global.CdsOverlayMenu = { hideAll: hideOverlayMenus, place: placeOverlayMenu, toggle: toggleOverlayMenu, bindKebabs: bindKebabMenus };
 })(typeof window !== 'undefined' ? window : globalThis);

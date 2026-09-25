@@ -272,7 +272,7 @@ test('34-36 documentos, portal cliente e escritório',async()=>{
   const office=await fetch(base+'/');
   assert.equal(office.status,200);
   const html=await office.text();
-  assert.match(html,/app\.js\?v=s28-4-2/);
+  assert.match(html,/app\.js\?v=s39-5/);
   const js=fs.readFileSync(path.join(__dirname,'../frontend/public/assets/app.js'),'utf8');
   assert.match(js,/Após classificar, a movimentação seguirá para aprovação/);
   assert.match(js,/Após aprovar, o lançamento contábil será efetivado automaticamente/);

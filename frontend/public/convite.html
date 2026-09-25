@@ -1,7 +1,35 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Acesso | CDS Contábil Connect</title><link rel="stylesheet" href="/assets/password-toggle.css?v=s27-6"><style>body{font-family:Georgia,serif;background:#eef2f1;color:#182522;margin:0;min-height:100vh;display:grid;place-items:center}.card{background:#fff;max-width:520px;width:calc(100% - 32px);padding:32px;border:1px solid #d8e0dc;box-shadow:0 12px 30px #16352a14}h1{margin-top:0}label{display:block;margin:14px 0 6px;font:600 14px Arial,sans-serif}input,button{box-sizing:border-box;width:100%;padding:12px;border:1px solid #b9c8c1;border-radius:4px;font-size:16px}button{margin-top:20px;background:#166b4a;color:white;border:0;cursor:pointer}small{font-family:Arial,sans-serif;color:#5e6d66}.error{color:#a33;margin-top:16px}.ok{color:#17613f;margin-top:16px}.actions{margin-top:20px}.actions a{display:inline-block;background:#166b4a;color:#fff;text-decoration:none;padding:12px 18px;border-radius:4px;font:600 15px Arial,sans-serif}.pw-field .pw-toggle{border:0;background:transparent;color:#5e6d66;margin-top:0;width:auto;padding:6px 10px;font:600 12px Arial,sans-serif}</style></head><body><main class="card"><p><strong>CDS CONTÁBIL CONNECT</strong></p><h1 id="title">Ative seu acesso</h1><div id="details">Validando convite...</div><form id="form" hidden><div id="nameField"><label for="name">Nome</label><input id="name" name="name" required></div><label for="password" id="passwordLabel">Senha</label><input id="password" name="password" type="password" minlength="8" required autocomplete="new-password"><label for="confirmation" id="confirmationLabel">Confirmar senha</label><input id="confirmation" name="confirmation" type="password" minlength="8" required autocomplete="new-password"><small>Mínimo de 8 caracteres, com letras e números.</small><button id="submitBtn" type="submit">Ativar minha conta</button></form><div id="message"></div></main><script src="/assets/password-toggle.js?v=s27-6"></script><script>
-const token=location.pathname.split('/').pop(),details=document.querySelector('#details'),form=document.querySelector('#form'),message=document.querySelector('#message'),title=document.querySelector('#title');
-let isReset=false;
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Acesso | CDS Contábil Connect</title><link rel="stylesheet" href="/assets/password-toggle.css?v=s27-6"><style>body{font-family:Georgia,serif;background:#eef2f1;color:#182522;margin:0;min-height:100vh;display:grid;place-items:center}.card{background:#fff;max-width:520px;width:calc(100% - 32px);padding:32px;border:1px solid #d8e0dc;box-shadow:0 12px 30px #16352a14}h1{margin-top:0}label{display:block;margin:14px 0 6px;font:600 14px Arial,sans-serif}input,button{box-sizing:border-box;width:100%;padding:12px;border:1px solid #b9c8c1;border-radius:4px;font-size:16px}button{margin-top:20px;background:#166b4a;color:white;border:0;cursor:pointer}button:disabled{opacity:.6;cursor:default}small{font-family:Arial,sans-serif;color:#5e6d66}.error{color:#a33;margin-top:16px}.ok{color:#17613f;margin-top:16px}.actions{margin-top:20px}.actions a{display:inline-block;background:#166b4a;color:#fff;text-decoration:none;padding:12px 18px;border-radius:4px;font:600 15px Arial,sans-serif}.pw-field .pw-toggle{border:0;background:transparent;color:#5e6d66;margin-top:0;width:auto;padding:6px 10px;font:600 12px Arial,sans-serif}.field{margin:0}.muted{font-family:Arial,sans-serif;color:#5e6d66;font-size:14px}</style></head><body><main class="card"><p><strong>CDS CONTÁBIL CONNECT</strong></p><div id="stage"><h1 id="title">Ative seu acesso</h1><div id="details">Validando convite...</div><form id="form" hidden><div id="nameField"><label for="name">Nome</label><input id="name" name="name" required></div><label for="password" id="passwordLabel">Senha</label><input id="password" name="password" type="password" minlength="8" required autocomplete="new-password"><label for="confirmation" id="confirmationLabel">Confirmar senha</label><input id="confirmation" name="confirmation" type="password" minlength="8" required autocomplete="new-password"><small>Mínimo de 8 caracteres, com letras e números.</small><button id="submitBtn" type="submit">Salvar senha</button></form><div id="message"></div></div></main><script src="/assets/password-toggle.js?v=s27-6"></script><script src="/assets/access-pin.js?v=s38"></script><script>
+const token=location.pathname.split('/').pop(),stage=document.querySelector('#stage'),details=document.querySelector('#details'),form=document.querySelector('#form'),message=document.querySelector('#message'),title=document.querySelector('#title');
+let isReset=false,accessToken=null,redirectTo='/portal/';
 function showError(text){title.textContent='Acesso';details.textContent=text;form.hidden=true;message.className='error';message.textContent='';}
+function storeToken(tok,dest){
+  if(!tok)return;
+  localStorage.setItem(dest.indexOf('/portal')===0?'ccc_client_token':'ccc_office_token',tok);
+  localStorage.removeItem('ccc_token');
+}
+function showPinStep(){
+  stage.innerHTML='';
+  CdsAccessPin.mountBlocking(stage,{
+    api:async(path,opt={})=>{
+      const headers={'Content-Type':'application/json',Authorization:'Bearer '+accessToken};
+      const r=await fetch('/api'+path,{...opt,headers});
+      let body={};try{body=await r.json()}catch{}
+      if(!r.ok)throw Object.assign(new Error(body.message||body.error||'Erro'),{status:r.status});
+      return body;
+    },
+    showForgot:true,
+    onForgot:()=>{
+      stage.innerHTML='<h1>Esqueci meu PIN</h1><p>Para proteger sua conta, use a recuperação de acesso: defina uma nova senha e, em seguida, cadastre um novo PIN. O PIN antigo não pode ser recuperado.</p><div class="actions"><a href="'+(redirectTo.indexOf('/portal')===0?'/portal/':'/')+'">Ir para o login</a></div>';
+    },
+    onSuccess:async()=>{
+      const msg=document.createElement('div');
+      msg.className='ok';
+      msg.innerHTML='PIN cadastrado com sucesso.<br><strong>Seu acesso está protegido.</strong>';
+      stage.appendChild(msg);
+      setTimeout(()=>{location.href=redirectTo},700);
+    }
+  });
+}
 fetch('/api/invitations/'+encodeURIComponent(token)).then(async r=>{const x=await r.json();if(r.ok){
   isReset=x.purpose==='PASSWORD_RESET'||/nova senha/i.test(x.title||'');
   title.textContent=x.title||(isReset?'Crie sua nova senha':'Ative seu acesso');
@@ -11,20 +39,33 @@ fetch('/api/invitations/'+encodeURIComponent(token)).then(async r=>{const x=awai
     document.querySelector('#name').required=false;
     document.querySelector('#passwordLabel').textContent='Nova senha';
     document.querySelector('#confirmationLabel').textContent='Confirmar nova senha';
-    document.querySelector('#submitBtn').textContent='Criar nova senha';
+    document.querySelector('#submitBtn').textContent='Salvar senha';
   }else{
     details.innerHTML='<p>Você foi convidado para acessar os dados de <b>'+x.company+'</b> pelo escritório <b>'+x.tenant+'</b>.</p><p>E-mail: <b>'+x.email+'</b></p>';
     form.name.value=x.name;
+    document.querySelector('#submitBtn').textContent='Salvar senha';
   }
   form.hidden=false;return;
 }showError(x.message||'Não foi possível validar este convite.')}).catch(()=>showError('Não foi possível validar este convite.'));
-form.onsubmit=async e=>{e.preventDefault();const body=Object.fromEntries(new FormData(form));if(isReset){body.name=body.name||undefined;delete body.name}const r=await fetch('/api/invitations/'+encodeURIComponent(token)+'/accept',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const x=await r.json();if(!r.ok){message.className='error';message.textContent=x.message||'Não foi possível validar este convite.';return}
-if(isReset){
-  form.hidden=true;details.innerHTML='';title.textContent='Senha criada com sucesso.';
-  message.className='ok';message.innerHTML='Senha criada com sucesso.<div class="actions"><a href="'+(x.redirect||'/portal/')+'">Acessar Portal</a></div>';
-if(x.token){const dest=x.redirect||'/portal/';localStorage.setItem(dest.indexOf('/portal')===0?'ccc_client_token':'ccc_office_token',x.token);localStorage.removeItem('ccc_token')}
-  return;
-}
-{const dest=x.redirect||'/portal/';localStorage.setItem(dest.indexOf('/portal')===0?'ccc_client_token':'ccc_office_token',x.token);localStorage.removeItem('ccc_token')}message.className='ok';message.textContent='Conta ativada com sucesso. Redirecionando...';setTimeout(()=>location.href=x.redirect||'/portal/',400)
-}
+form.onsubmit=async e=>{
+  e.preventDefault();
+  const body=Object.fromEntries(new FormData(form));
+  if(isReset){body.name=body.name||undefined;delete body.name}
+  const r=await fetch('/api/invitations/'+encodeURIComponent(token)+'/accept',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const x=await r.json();
+  if(!r.ok){message.className='error';message.textContent=x.message||'Não foi possível validar este convite.';return}
+  accessToken=x.token;
+  redirectTo=x.redirect||'/portal/';
+  storeToken(accessToken,redirectTo);
+  message.className='ok';
+  message.textContent='Senha salva com sucesso.';
+  form.hidden=true;
+  details.innerHTML='';
+  title.textContent='Senha salva';
+  if(x.requires_pin_setup!==false){
+    setTimeout(showPinStep,350);
+    return;
+  }
+  setTimeout(()=>location.href=redirectTo,400);
+};
 </script></body></html>

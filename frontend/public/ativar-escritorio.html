@@ -1,0 +1,26 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ativar escritório | CDS Contábil Connect</title><link rel="stylesheet" href="/assets/theme.css?v=s34"><style>body{font-family:Georgia,serif;background:#eef2f1;color:#182522;margin:0;min-height:100vh;display:grid;place-items:center}.card{background:#fff;max-width:520px;width:calc(100% - 32px);padding:32px;border:1px solid #d8e0dc;box-shadow:0 12px 30px #16352a14}h1{margin-top:0}button{box-sizing:border-box;width:100%;padding:12px;border:0;border-radius:4px;font-size:16px;margin-top:20px;background:#166b4a;color:white;cursor:pointer}button:disabled{opacity:.6;cursor:default}small{font-family:Arial,sans-serif;color:#5e6d66}.error{color:#a33;margin-top:16px}.ok{color:#17613f;margin-top:16px}.actions{margin-top:20px}.actions a{display:inline-block;background:#166b4a;color:#fff;text-decoration:none;padding:12px 18px;border-radius:4px;font:600 15px Arial,sans-serif}</style></head><body><main class="card"><p><strong>CDS CONTÁBIL CONNECT</strong></p><h1 id="title">Ativar escritório</h1><div id="details">Validando cadastro...</div><button id="confirmBtn" type="button" hidden>Confirmar e-mail e ativar conta</button><div id="message"></div></main><script>
+const token=location.pathname.split('/').pop(),details=document.querySelector('#details'),message=document.querySelector('#message'),title=document.querySelector('#title'),btn=document.querySelector('#confirmBtn');
+function showError(text){title.textContent='Ativação';details.textContent=text;btn.hidden=true;message.className='error';message.textContent='';}
+fetch('/api/auth/signup/'+encodeURIComponent(token)).then(async r=>{const x=await r.json();if(r.ok&&x.status==='PENDING'){
+  title.textContent='Confirme seu e-mail';
+  details.innerHTML='<p>Escritório: <b>'+String(x.office_name||'').replace(/</g,'&lt;')+'</b></p><p>Responsável: <b>'+String(x.owner_name||'').replace(/</g,'&lt;')+'</b></p><p>E-mail: <b>'+String(x.owner_email||'').replace(/</g,'&lt;')+'</b></p><p class="muted"><small>'+(x.message||'Confirme para ativar sua conta.')+'</small></p>';
+  btn.hidden=false;return;
+}if(r.ok&&x.status==='COMPLETED'){
+  title.textContent='Conta já ativada';
+  details.textContent=x.message||'Esta conta já foi ativada.';
+  message.className='ok';message.innerHTML='<div class="actions"><a href="/">Ir para o login</a></div>';
+  return;
+}showError(x.message||'Não foi possível validar este cadastro.')}).catch(()=>showError('Não foi possível validar este cadastro.'));
+btn.onclick=async()=>{
+  btn.disabled=true;message.textContent='';
+  try{
+    const r=await fetch('/api/auth/signup/'+encodeURIComponent(token)+'/confirm',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const x=await r.json();
+    if(!r.ok){message.className='error';message.textContent=x.message||'Não foi possível ativar a conta.';btn.disabled=false;return}
+    title.textContent='Conta ativada';
+    details.innerHTML='<p>E-mail confirmado. Sua conta de administrador está pronta.</p>'+(x.tenant_slug?'<p>Código do escritório: <b>'+String(x.tenant_slug).replace(/</g,'&lt;')+'</b></p>':'');
+    btn.hidden=true;
+    message.className='ok';message.innerHTML='Conta ativada com sucesso. No primeiro acesso você cadastrará seu PIN de 4 dígitos.<div class="actions"><a href="/">Entrar no sistema</a></div>';
+  }catch{message.className='error';message.textContent='Não foi possível ativar a conta.';btn.disabled=false}
+};
+</script></body></html>

@@ -157,13 +157,17 @@ test('frontend da central de documentos é responsivo e preserva ações', () =>
   assert.match(js, /Analisar/);
   assert.doesNotMatch(js, /Analisar documento/);
   assert.match(js, /Ver análise/);
+  assert.match(js, /extractionFailureHelp/);
+  assert.match(js, /SEM OCR/);
+  assert.match(js, /O que fazer/);
   assert.match(js, /Limpar filtros/);
   assert.match(js, /docs-table/);
   assert.match(js, /docs-card/);
   assert.match(js, /docs-primary-action/);
   assert.match(js, /more-btn/);
-  assert.match(js, /more-menu-open/);
+  assert.match(js, /overlay-menu-open|CdsOverlayMenu/);
   assert.match(js, /Não foi possível carregar os documentos/);
+  assert.match(theme, /overlay-menu-open/);
   assert.match(theme, /table-layout:fixed/);
   assert.match(theme, /\.docs-cards\{display:grid/);
   assert.doesNotMatch(theme, /#0f5f59/i);

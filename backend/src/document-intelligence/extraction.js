@@ -46,8 +46,9 @@ function createDocumentExtractionService({
   let visualAi = null;
 
   function setVisualAi(deps) {
+    const previous = visualAi;
     visualAi = deps || null;
-    return visualAi;
+    return previous;
   }
 
   function fail(message, code, http) {
@@ -152,9 +153,61 @@ function createDocumentExtractionService({
     }
   }
 
+  function visualStatus(tenantId) {
+    if (!visualAi) return { available: false, reason: 'AI_NOT_CONFIGURED' };
+    if (typeof visualAi.status === 'function') {
+      try {
+        const status = visualAi.status(tenantId) || {};
+        if (status.available) return { available: true, reason: null };
+        const reason = String(status.reason || 'AI_NOT_CONFIGURED');
+        return {
+          available: false,
+          reason: ['AI_DISABLED', 'AI_LIMIT_REACHED', 'AI_NOT_CONFIGURED'].includes(reason)
+            ? reason
+            : 'AI_NOT_CONFIGURED'
+        };
+      } catch {
+        return { available: false, reason: 'AI_NOT_CONFIGURED' };
+      }
+    }
+    if (typeof visualAi.available !== 'function') {
+      return { available: false, reason: 'AI_NOT_CONFIGURED' };
+    }
+    try {
+      return visualAi.available(tenantId)
+        ? { available: true, reason: null }
+        : { available: false, reason: 'AI_NOT_CONFIGURED' };
+    } catch {
+      return { available: false, reason: 'AI_NOT_CONFIGURED' };
+    }
+  }
+
   function visualAvailable(tenantId) {
-    if (!visualAi || typeof visualAi.available !== 'function') return false;
-    try { return !!visualAi.available(tenantId); } catch { return false; }
+    return visualStatus(tenantId).available;
+  }
+
+  function visualUnavailableError(tenantId) {
+    const status = visualStatus(tenantId);
+    const reason = status.reason || 'AI_NOT_CONFIGURED';
+    if (reason === 'AI_DISABLED') {
+      return fail(
+        'A interpretação visual por IA está desligada neste escritório. Ative a IA em Configurações → Inteligência Artificial, ou preencha os dados manualmente.',
+        'AI_DISABLED',
+        503
+      );
+    }
+    if (reason === 'AI_LIMIT_REACHED') {
+      return fail(
+        'O limite mensal de IA foi atingido. Revise o documento e preencha os dados manualmente.',
+        'AI_LIMIT_REACHED',
+        409
+      );
+    }
+    return fail(
+      'A interpretação visual por IA não está configurada neste servidor (credencial OpenAI ausente). Configure a chave em Configurações → IA ou no ambiente (AI_PROVIDER=openai + OPENAI_API_KEY), ou preencha os dados manualmente.',
+      'AI_NOT_CONFIGURED',
+      503
+    );
   }
 
   async function runVisualInterpretation(extraction, document, mime, buffer, textExcerpt) {
@@ -226,12 +279,9 @@ function createDocumentExtractionService({
       const mime = mimeOf(document, buffer);
 
       if (mime === PNG || mime === JPEG) {
+        // Sem OCR local: PNG/JPG usam exclusivamente a IA visual já existente no produto.
         if (!visualAvailable(extraction.tenant_id)) {
-          throw fail(
-            'OCR não está disponível nesta instalação.',
-            'EXTRACTION_UNAVAILABLE',
-            422
-          );
+          throw visualUnavailableError(extraction.tenant_id);
         }
         try {
           const interpreted = await runVisualInterpretation(
@@ -240,6 +290,9 @@ function createDocumentExtractionService({
           completeExtracted(extractionId, extraction, interpreted, 'AI_VISUAL', null);
         } catch (error) {
           if (error.code === 'DOCUMENT_VISUAL_FORMAT_UNSUPPORTED') throw error;
+          if (['AI_NOT_CONFIGURED', 'AI_DISABLED', 'AI_LIMIT_REACHED'].includes(error.code)) {
+            throw error;
+          }
           throw fail(
             'Não foi possível interpretar automaticamente este documento. Revise os dados manualmente.',
             error.code || 'AI_VISUAL_FAILED',
@@ -316,15 +369,21 @@ function createDocumentExtractionService({
       throw fail('O PDF não possui texto extraível.', 'NO_TEXT_EXTRACTED', 422);
     } catch (error) {
       const code = error.code || 'EXTRACTION_FAILED';
-      const message = code === 'EXTRACTION_UNAVAILABLE'
-        ? 'OCR não está disponível nesta instalação.'
-        : code === 'NO_TEXT_EXTRACTED'
-          ? 'O documento não possui texto extraível.'
-          : code === 'DOCUMENT_VISUAL_FORMAT_UNSUPPORTED'
-            ? 'Formato visual não suportado para interpretação.'
-            : (error.message && /interpretar automaticamente|Revise os dados/i.test(error.message)
-              ? error.message
-              : 'Não foi possível extrair o conteúdo do documento.');
+      const message = code === 'AI_DISABLED'
+        ? (error.message || 'A interpretação visual por IA está desligada neste escritório. Ative a IA ou preencha os dados manualmente.')
+        : code === 'AI_LIMIT_REACHED'
+          ? (error.message || 'O limite mensal de IA foi atingido. Preencha os dados manualmente.')
+          : code === 'AI_NOT_CONFIGURED'
+            ? (error.message || 'A interpretação visual por IA não está configurada neste servidor. Configure a credencial OpenAI ou preencha os dados manualmente.')
+            : code === 'NO_TEXT_EXTRACTED'
+              ? 'O documento não tem texto selecionável para leitura automática. Visualize o original e preencha os campos manualmente, ou peça um PDF com texto.'
+              : code === 'DOCUMENT_VISUAL_FORMAT_UNSUPPORTED'
+                ? 'Este formato de imagem não é suportado pela interpretação visual automática. Revise e preencha os dados manualmente.'
+                : code === 'EXTRACTION_UNAVAILABLE'
+                  ? 'Não foi possível ler automaticamente esta imagem. O arquivo foi recebido e permanece pendente — preencha data, valor e fornecedor manualmente em Ver análise.'
+                  : (error.message && /interpretar automaticamente|Revise os dados|interpretação visual/i.test(error.message)
+                    ? error.message
+                    : 'Não foi possível extrair o conteúdo do documento automaticamente. Revise o original e preencha os dados manualmente.');
       run(
         `UPDATE document_extractions
          SET status='FAILED',extraction_method=?,error_code=?,error_message=?,

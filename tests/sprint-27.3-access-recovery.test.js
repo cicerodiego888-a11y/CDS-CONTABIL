@@ -368,7 +368,7 @@ test('18 E-mail é enviado corretamente', async () => {
   assert.equal(sentMails.length >= 1, true);
   const mail = sentMails[sentMails.length - 1];
   assert.equal(mail.subject, 'Redefinição de acesso — CDS Contábil Connect');
-  assert.match(mail.text, /escritório contábil solicitou/i);
+  assert.match(mail.text, /Recebemos uma solicitação de redefinição/i);
   assert.doesNotMatch(mail.text, /Senha@123|NovaSenha/);
   assert.doesNotMatch(mail.html, /Senha@123|password_hash/);
 });
@@ -475,11 +475,12 @@ test('25 Fluxo normal de convite continua funcionando', async () => {
   assert.match(acc.data.message, /ativada/i);
 });
 
-test('26 UI portal solicita redefinição via escritório', () => {
+test('26 UI portal inicia recuperação automática', () => {
   const portal = fs.readFileSync(path.join(__dirname, '../frontend/public/portal/portal.js'), 'utf8');
   assert.match(portal, /Esqueci minha senha/);
-  assert.match(portal, /Solicite a redefinição de acesso ao seu escritório/);
+  assert.match(portal, /Enviamos as instruções para o seu e-mail cadastrado/);
   assert.match(portal, /\/api\/auth\/forgot-password/);
+  assert.doesNotMatch(portal, /Solicitar redefinição/);
   assert.doesNotMatch(portal, /\/api\/.*reset-password/i);
   const appJs = fs.readFileSync(path.join(__dirname, '../frontend/public/assets/app.js'), 'utf8');
   assert.match(appJs, /Redefinir acesso/);

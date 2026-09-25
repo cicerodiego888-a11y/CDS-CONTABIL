@@ -4,12 +4,13 @@ const { createExportService, SYSTEM_LABELS } = require('./service');
 
 function mountExportRoutes(app, deps) {
   const {
-    db, id, auth, role, scope, deny, audit, companyOk, today, pageParams, paged, scopedCompanyWhere, exportDir
+    db, id, auth, role, scope, deny, audit, companyOk, today, pageParams, paged, scopedCompanyWhere, exportDir,
+    periodService
   } = deps;
 
   const one = (sql, ...p) => db.prepare(sql).get(...p);
   const qRows = (sql, ...p) => db.prepare(sql).all(...p);
-  const service = createExportService({ db, id, exportDir, audit });
+  const service = createExportService(deps);
   const office = role('OWNER', 'ACCOUNTANT', 'STAFF');
 
   function handle(err, res) {
@@ -19,6 +20,9 @@ function mountExportRoutes(app, deps) {
       message: err.message || 'Não foi possível gerar a exportação.'
     };
     if (err.preview) body.preview = err.preview;
+    if (err.details) body.details = err.details;
+    if (err.competence) body.competence = err.competence;
+    if (err.period_id) body.period_id = err.period_id;
     return res.status(err.http || 422).json(body);
   }
 

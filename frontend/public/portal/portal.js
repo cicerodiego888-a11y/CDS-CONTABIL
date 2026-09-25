@@ -1,4 +1,21 @@
 const state={token:(()=>{try{return localStorage.getItem('ccc_client_token')||localStorage.getItem('ccc_token')}catch{return null}})(),user:null,company:null,page:'home',categories:[],banks:[],filters:{},push:{ready:false,reason:null,checked:false,permission:'default'},unread:0,notifications:[],branding:null,brandingLogoSrc:null};
+function portalRemember(meta){try{if(window.CdsBackNav)CdsBackNav.remember(state,meta||{})}catch{/* ignore */}}
+function portalGoBack(opts){
+  opts=opts||{};
+  if(!window.CdsBackNav){
+    if(typeof opts.clear==='function')opts.clear();
+    if(typeof opts.after==='function')opts.after({source:'legacy'});
+    return;
+  }
+  return CdsBackNav.back({
+    state,
+    fallbackPage:opts.fallbackPage||'home',
+    clear:opts.clear,
+    after:opts.after||(()=>typeof render==='function'&&render())
+  });
+}
+const ROOT_PORTAL_PAGES=new Set(['home','expenses','revenues','documents','requests','notifications','profile']);
+function portalBackBtn(id,label){return window.CdsBackNav?CdsBackNav.buttonHtml(id||'cdsBack',label||'← Voltar'):`<button type="button" class="btn light" id="${id||'cdsBack'}">${label||'← Voltar'}</button>`}
 const root=document.querySelector('#portal');
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
 const money=c=>Number(c||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
@@ -155,7 +172,26 @@ function portalNavLogoHtml(){
   }
   return `<div class="logo cds-product-logo"><img src="/assets/cds-pwa-192.png?v=s28-4-2" alt="CDS Contábil Connect"><small>PORTAL DO CLIENTE</small></div>`;
 }
-async function boot(){if(!state.token)return login();try{state.user=await api('/auth/me');if(state.user.role!=='CLIENT'){if(String(location.port)==='3334'){location.href=location.protocol+'//'+location.hostname+':3333/';return}location.href='/';return}try{if(state.token&&!localStorage.getItem('ccc_client_token')){localStorage.setItem('ccc_client_token',state.token);if(localStorage.getItem('ccc_token')===state.token)localStorage.removeItem('ccc_token')}}catch{}state.canWrite=clientCan('client.expenses.create');const d=await api('/client/dashboard').catch(e=>{if(e&&e.status===401)throw e;return null});if(d&&d.company)state.company=d.company;await loadClientBranding();await syncPortalPush({prompt:false});await refreshClientNotifBadge().catch(()=>{});if(typeof window.__cdsStartPortalRealtime==='function')window.__cdsStartPortalRealtime();await render()}catch(e){if(e&&e.status===401)return;toast(e.message||'Não foi possível concluir a operação.');if(state.user)return render();root.innerHTML=`<div class="form-card login-card"><h1>Não foi possível carregar o portal</h1><p>${esc(e.message||'Não foi possível concluir a operação.')}</p><button class="btn" id="retryPortal" style="margin-top:12px">Tentar novamente</button></div>`;document.querySelector('#retryPortal').onclick=()=>boot()}}
+
+function showClientPinGate(){
+  root.innerHTML='<div class="form-card login-card" id="pinGateCard"></div>';
+  const card=document.querySelector('#pinGateCard');
+  if(!window.CdsAccessPin){card.innerHTML='<h1>Crie seu PIN de acesso</h1><p>Atualize a página para continuar.</p>';return}
+  CdsAccessPin.mountBlocking(card,{
+    api,
+    showForgot:true,
+    onForgot:()=>{
+      card.innerHTML='<h1>Esqueci meu PIN</h1><p>Para redefinir o PIN com segurança, use <b>Esqueci minha senha</b> na tela de login. Após criar a nova senha, você cadastrará um novo PIN. O PIN antigo não pode ser recuperado.</p><button type="button" class="btn" id="pinForgotGoLogin" style="margin-top:14px">Ir para o login</button>';
+      document.querySelector('#pinForgotGoLogin').onclick=()=>clearSession('Defina uma nova senha para cadastrar um novo PIN.');
+    },
+    onSuccess:async()=>{
+      toast('PIN cadastrado com sucesso. Seu acesso está protegido.','success');
+      if(state.user){state.user.pin_configured=true;state.user.requires_pin_setup=false}
+      boot();
+    }
+  });
+}
+async function boot(){if(!state.token)return login();try{state.user=await api('/auth/me');if(state.user.requires_pin_setup)return showClientPinGate();if(state.user.role!=='CLIENT'){if(String(location.port)==='3334'){location.href=location.protocol+'//'+location.hostname+':3333/';return}location.href='/';return}try{if(state.token&&!localStorage.getItem('ccc_client_token')){localStorage.setItem('ccc_client_token',state.token);if(localStorage.getItem('ccc_token')===state.token)localStorage.removeItem('ccc_token')}}catch{}state.canWrite=clientCan('client.expenses.create');const d=await api('/client/dashboard').catch(e=>{if(e&&e.status===401)throw e;return null});if(d&&d.company)state.company=d.company;await loadClientBranding();await syncPortalPush({prompt:false});await refreshClientNotifBadge().catch(()=>{});if(typeof window.__cdsStartPortalRealtime==='function')window.__cdsStartPortalRealtime();await render()}catch(e){if(e&&e.status===401)return;toast(e.message||'Não foi possível concluir a operação.');if(state.user)return render();root.innerHTML=`<div class="form-card login-card"><h1>Não foi possível carregar o portal</h1><p>${esc(e.message||'Não foi possível concluir a operação.')}</p><button class="btn" id="retryPortal" style="margin-top:12px">Tentar novamente</button></div>`;document.querySelector('#retryPortal').onclick=()=>boot()}}
 function clientProfileLabel(){return({CLIENT_ADMIN:'Administrador',CLIENT_FINANCE:'Financeiro',CLIENT_VIEWER:'Visualizador'}[state.user&&state.user.profile]||(state.user&&state.user.profile)||'Perfil')}
 function timeAgo(iso){if(!iso)return '';const t=new Date(iso).getTime();if(Number.isNaN(t))return iso;const s=Math.max(0,Math.round((Date.now()-t)/1000));if(s<60)return 'Há poucos segundos';if(s<3600)return 'Há '+Math.floor(s/60)+' min';if(s<86400)return 'Há '+Math.floor(s/3600)+' h';return 'Há '+Math.floor(s/86400)+' d'}
 function applyClientNotifBadge(unread){const n=Number(unread||0)||0;state.unread=n;const badge=document.querySelector('#notifBadge');if(badge){badge.textContent=n||'';badge.hidden=!(n>0)}const label=document.querySelector('#notifLabel');if(label)label.textContent='Notificações'+(n?` (${n})`:'');const toggle=document.querySelector('#notifToggle');if(toggle)toggle.setAttribute('aria-label',n?`Notificações (${n})`:'Notificações')}
@@ -188,36 +224,61 @@ function followClientDeepLink(url){
 async function openClientNotification(id){
   const n=(state.notifications||[]).find(x=>x.id===id);
   try{await api('/notificacoes/'+id+'/read',{method:'PATCH'})}catch{}
-  const panel=document.querySelector('#notifPanel');if(panel)panel.hidden=true;
+  if(window.CdsOverlayMenu)window.CdsOverlayMenu.hideAll();
+  else{const panel=document.querySelector('#notifPanel');if(panel)panel.hidden=true}
   await refreshClientNotifBadge();
   if(!n){if(state.page==='notifications')notifications();return}
   followClientDeepLink(clientNotifDeepLink(n));
+}
+function formatClientNotifDateTime(iso){if(!iso)return{date:'-',time:'-'};const d=new Date(iso);if(Number.isNaN(d.getTime()))return{date:String(iso),time:''};return{date:d.toLocaleDateString('pt-BR'),time:d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}}
+async function openClientNotifHistory(){
+  try{
+    const data=await api('/client/notificacoes');
+    const list=Array.isArray(data)?data:(data.items||[]);
+    state.notifications=list;
+    const rows=list.map(n=>{
+      const dt=formatClientNotifDateTime(n.created_at);
+      const origin=n.company_name||n.context||'-';
+      const entity=[n.entity_type,n.entity_id].filter(Boolean).join(' · ')||'-';
+      return `<div class="notice ${n.read_at?'':'unread'}" style="margin-bottom:10px"><b>${esc(n.title||'')}</b><p>${esc(n.body||n.message||'')}</p><small>${esc(dt.date)} ${esc(dt.time)} · ${esc(n.type||'-')} · ${esc(origin)} · ${esc(entity)} · ${n.read_at?'Lida':'Não lida'}</small></div>`;
+    }).join('')||'<div class="empty">Histórico vazio.</div>';
+    root.insertAdjacentHTML('beforeend',`<div class="modal-back" id="modal"><div class="form-card modal-lg"><h2>Histórico de notificações</h2><p>Avisos lidos permanecem aqui. O sino mostra apenas não lidas.</p><div style="max-height:60vh;overflow:auto;margin-top:12px">${rows}</div><div class="form-actions"><button type="button" class="btn" id="closeNotifHistory">Fechar</button></div></div></div>`);
+    document.querySelector('#closeNotifHistory').onclick=()=>document.querySelector('#modal')?.remove();
+  }catch(err){toast(err.message||'Não foi possível abrir o histórico.')}
 }
 async function drawClientNotifList(){
   const box=document.querySelector('#notifList');if(!box)return;
   box.innerHTML='<div class="empty">Carregando...</div>';
   try{
     const data=await api('/client/notificacoes');
-    const list=Array.isArray(data)?data:(data.items||[]);
-    state.notifications=list;
+    const all=Array.isArray(data)?data:(data.items||[]);
+    state.notifications=all;
+    const list=all.filter(n=>!n.read_at).slice(0,20);
     if(!list.length){box.innerHTML='<div class="empty-state"><h3>Nenhuma notificação</h3><p>Você está em dia.</p></div>';return}
-    box.innerHTML=list.slice(0,20).map(n=>{
+    box.innerHTML=list.map(n=>{
       const company=esc(n.company_name||(state.company&&(state.company.trade_name||state.company.name))||'');
       const preview=esc(n.preview||n.context||'');
       const body=esc(n.body||n.message||'');
-      return `<button type="button" class="notif-item ${n.read_at?'read':'unread'}" data-id="${esc(n.id)}"><b>${esc(n.title||'Notificação')}</b>${company?`<span class="notif-co">${company}</span>`:''}<span>${body}</span>${preview?`<small class="notif-preview">"${preview}"</small>`:''}<small>${esc(timeAgo(n.created_at))}${n.read_at?' · lida':' · não lida'}</small><small class="notif-open-hint">Abrir</small></button>`;
+      return `<button type="button" class="notif-item unread" data-id="${esc(n.id)}"><b>${esc(n.title||'Notificação')}</b>${company?`<span class="notif-co">${company}</span>`:''}<span>${body}</span>${preview?`<small class="notif-preview">"${preview}"</small>`:''}<small>${esc(timeAgo(n.created_at))} · não lida</small><small class="notif-open-hint">Abrir</small></button>`;
     }).join('');
     box.querySelectorAll('.notif-item').forEach(btn=>btn.onclick=()=>openClientNotification(btn.dataset.id));
   }catch(e){box.innerHTML=`<div class="empty">Erro: ${esc(e.message)}</div>`}
 }
 function bindClientHeader(){
+  if(window.CdsOverlayMenu)window.CdsOverlayMenu.bindKebabs(document);
   const panel=document.querySelector('#notifPanel'),toggle=document.querySelector('#notifToggle');
   if(toggle&&panel){
-    toggle.onclick=e=>{e.stopPropagation();const open=panel.hidden;panel.hidden=!open;if(open)drawClientNotifList()};
+    toggle.onclick=e=>{
+      e.stopPropagation();
+      if(window.CdsOverlayMenu){const open=panel.hidden;window.CdsOverlayMenu.toggle(toggle,panel,open?drawClientNotifList:null);return}
+      const open=panel.hidden;panel.hidden=!open;if(open)drawClientNotifList();
+    };
   }
+  const historyBtn=document.querySelector('#notifHistory');
+  if(historyBtn)historyBtn.onclick=e=>{e.stopPropagation();openClientNotifHistory()};
   const readAll=document.querySelector('#notifReadAll');
   if(readAll)readAll.onclick=async()=>{try{await api('/notificacoes/read-all',{method:'PATCH'});await drawClientNotifList();await refreshClientNotifBadge();if(state.page==='notifications')notifications()}catch(err){toast(err.message)}};
-  if(!window.__cdsClientNotifDocBound){
+  if(!window.CdsOverlayMenu&&!window.__cdsClientNotifDocBound){
     window.__cdsClientNotifDocBound=true;
     document.addEventListener('click',e=>{const w=document.querySelector('#notifWrap'),p=document.querySelector('#notifPanel');if(w&&p&&!w.contains(e.target))p.hidden=true});
   }
@@ -227,11 +288,12 @@ function bindClientHeader(){
     btn.setAttribute('aria-expanded','false');
     btn.onclick=e=>{
       e.stopPropagation();
+      if(window.CdsOverlayMenu){window.CdsOverlayMenu.toggle(btn,drop);return}
       const open=drop.hidden;
       drop.hidden=!open;
       btn.setAttribute('aria-expanded',open?'true':'false');
     };
-    if(!window.__cdsClientUserMenuBound){
+    if(!window.CdsOverlayMenu&&!window.__cdsClientUserMenuBound){
       window.__cdsClientUserMenuBound=true;
       document.addEventListener('click',e=>{
         const menu=document.querySelector('#userMenu');
@@ -269,94 +331,138 @@ function shell(content){
   bindClientHeader();
   refreshClientNotifBadge().catch(()=>{});
 }
-function rememberedLogin(){try{return{tenant:localStorage.getItem('ccc_last_tenant')||'',email:localStorage.getItem('ccc_last_email')||''}}catch{return{tenant:'',email:''}}}
-function rememberLogin(tenant,email){try{if(tenant)localStorage.setItem('ccc_last_tenant',String(tenant).trim());if(email)localStorage.setItem('ccc_last_email',String(email).trim())}catch{/* ignore */}}
+function rememberedLogin(){try{return{tenant:localStorage.getItem('ccc_last_tenant')||'',email:localStorage.getItem('ccc_last_email')||'',envKey:localStorage.getItem('ccc_last_env_key')||''}}catch{return{tenant:'',email:'',envKey:''}}}
+function rememberLogin(email,tenantSlug,envKey){try{if(email)localStorage.setItem('ccc_last_email',String(email).trim());else localStorage.removeItem('ccc_last_email');if(tenantSlug)localStorage.setItem('ccc_last_tenant',String(tenantSlug).trim());else localStorage.removeItem('ccc_last_tenant');if(envKey)localStorage.setItem('ccc_last_env_key',String(envKey).trim());else localStorage.removeItem('ccc_last_env_key')}catch{/* ignore */}}
+function clearRememberedLogin(){try{localStorage.removeItem('ccc_last_email');localStorage.removeItem('ccc_last_tenant');localStorage.removeItem('ccc_last_env_key')}catch{/* ignore */}}
+function loginOfficeBrandHtml(office){
+  if(!office)return'';
+  if(office.logo_url)return`<img class="login-office-logo" src="${esc(office.logo_url)}" alt="Logo ${esc(office.name||office.office_name||'do escritório')}">`;
+  const name=office.name||office.office_name;
+  if(name)return`<strong class="login-office-name">${esc(name)}</strong>`;
+  return'';
+}
 function login(){
   const rem=rememberedLogin();
-  const demoTenant='demo';
   const demoEmail='cliente@cremolia.com.br';
   const demoPass='Client@123';
-  const guessDemo=!rem.tenant&&!rem.email;
-  root.innerHTML=`<div class="form-card login-card"><div class="login-office-brand" id="loginOfficeBrand"><div class="brand login-cds-fallback"><img class="login-cds-mark" src="/assets/cds-pwa-192.png?v=s28-4-2" alt="CDS"><span class="eyebrow">CDS Contábil Connect</span></div></div><h1>Portal do cliente</h1><p>Envie as informações financeiras da sua empresa para o escritório.</p><form id="loginForm"><div class="field"><label>Código do escritório</label><input name="tenant" required autocomplete="organization" value="${esc(rem.tenant||(guessDemo?demoTenant:''))}"></div><div class="field"><label>E-mail</label><input name="email" type="email" required value="${esc(rem.email||(guessDemo?demoEmail:''))}"></div><div class="field"><label>Senha</label><input name="password" type="password" required value="${guessDemo?esc(demoPass):''}"></div><label class="muted" style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" name="remember" ${rem.tenant||rem.email?'checked':''}> Lembrar-me</label><p class="muted demo-hint" ${guessDemo?'':'hidden'}>Demonstração: <b>${demoTenant}</b> / <b>${demoEmail}</b> / <b>${demoPass}</b></p><button class="btn" style="margin-top:18px;width:100%">Entrar</button></form><p style="margin-top:14px;text-align:center"><button type="button" class="btn light" id="forgotPassword" style="background:transparent;border:0;color:inherit;text-decoration:underline;cursor:pointer;padding:0">Esqueci minha senha</button></p><p style="margin-top:10px;text-align:center" class="muted">Solicitar acesso — fale com seu escritório contábil.</p><div id="forgotBox" hidden style="margin-top:16px;padding:14px;border:1px solid #d8e0dc;border-radius:10px;background:#f7faf8"><p style="margin:0;line-height:1.5">Solicite a redefinição de acesso ao seu escritório contábil.</p><p style="margin:10px 0 0;line-height:1.5" class="muted">Usaremos o código do escritório e o e-mail preenchidos acima.</p><button type="button" class="btn" id="forgotSubmit" style="margin-top:14px;width:100%">Solicitar redefinição</button><p id="forgotResult" hidden style="margin:12px 0 0;line-height:1.5"></p></div></div>`;
+  const guessDemo=!rem.email;
+  root.innerHTML=`<div class="form-card login-card"><div class="login-office-brand" id="loginOfficeBrand" aria-live="polite"></div><div id="loginMain"><h1>Portal do cliente</h1><p>Envie as informações financeiras da sua empresa para o escritório.</p><form id="loginForm" autocomplete="off"><div class="field"><label for="portalEmail">E-mail</label><input id="portalEmail" name="email" type="email" required autocomplete="username" value="${esc(rem.email||(guessDemo?demoEmail:''))}"></div><div class="field"><label for="portalPassword">Senha</label><input id="portalPassword" name="password" type="password" required autocomplete="current-password" value="${guessDemo?esc(demoPass):''}"></div><label class="muted" style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" name="remember" ${rem.email?'checked':''}> Lembrar-me</label><p class="muted demo-hint" ${guessDemo?'':'hidden'}>Demonstração: <b>${demoEmail}</b> / <b>${demoPass}</b></p><button class="btn" style="margin-top:18px;width:100%">Entrar</button></form><p style="margin-top:14px;text-align:center"><button type="button" class="btn light" id="forgotPassword" style="background:transparent;border:0;color:inherit;text-decoration:underline;cursor:pointer;padding:0">Esqueci minha senha</button></p><p id="forgotResult" hidden style="margin:12px 0 0;line-height:1.5;text-align:center"></p><p style="margin-top:10px;text-align:center" class="muted">Solicitar acesso — fale com seu escritório contábil.</p></div><div id="loginEnvPick" hidden><h1>Escolha seu ambiente</h1><p>Selecione a contabilidade para continuar</p><div class="login-env-list" id="loginEnvList"></div><button type="button" class="btn light" id="backFromEnv" style="margin-top:14px;width:100%">Voltar</button></div></div>`;
   const brandBox=document.querySelector('#loginOfficeBrand');
+  const loginMain=document.querySelector('#loginMain');
+  const envPick=document.querySelector('#loginEnvPick');
+  const envList=document.querySelector('#loginEnvList');
+  const loginForm=document.querySelector('#loginForm');
   let brandSeq=0;
+  let pendingChoice=null;
   const paintLoginBrand=(data)=>{
     if(!brandBox)return;
-    if(data&&data.configured&&data.logo_url){
-      brandBox.innerHTML=`<img class="login-office-logo" src="${esc(data.logo_url)}" alt="Logo ${esc(data.office_name||'do escritório')}"><div class="login-cds-soft muted">CDS Contábil Connect</div>`;
+    if(data&&(data.logo_url||data.name||data.office_name)){
+      const office={logo_url:data.logo_url||null,name:data.name||data.office_name||null};
+      brandBox.innerHTML=loginOfficeBrandHtml(office);
       return;
     }
-    brandBox.innerHTML=`<div class="brand login-cds-fallback"><img class="login-cds-mark" src="/assets/cds-pwa-192.png?v=s28-4-2" alt="CDS"><span class="eyebrow">CDS Contábil Connect</span></div>`;
+    brandBox.innerHTML='';
   };
-  const loadLoginBrand=()=>{
-    const f=document.querySelector('#loginForm');
-    const code=String((f&&f.tenant&&f.tenant.value)||'').trim();
+  const loadLoginBrand=(slug)=>{
+    const code=String(slug||rem.tenant||'').trim();
     if(!code){paintLoginBrand(null);return}
     const seq=++brandSeq;
-    fetch('/api/public/branding?tenant='+encodeURIComponent(code)).then(r=>r.json()).then(data=>{if(seq!==brandSeq)return;paintLoginBrand(data)}).catch(()=>{if(seq===brandSeq)paintLoginBrand(null)});
+    fetch('/api/public/branding?tenant='+encodeURIComponent(code)).then(r=>r.json()).then(data=>{
+      if(seq!==brandSeq)return;
+      if(data&&(data.logo_url||data.office_name))paintLoginBrand({logo_url:data.logo_url,office_name:data.office_name});
+      else paintLoginBrand(null);
+    }).catch(()=>{if(seq===brandSeq)paintLoginBrand(null)});
   };
-  const debounce=(fn,ms)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}};
-  const f0=document.querySelector('#loginForm');
-  if(f0&&f0.tenant){f0.tenant.addEventListener('input',debounce(loadLoginBrand,350));f0.tenant.addEventListener('change',loadLoginBrand);loadLoginBrand()}
+  loadLoginBrand(rem.tenant);
   fetch('/api/health').then(r=>r.json()).then(h=>{
     const f=document.querySelector('#loginForm');
     const hint=document.querySelector('.demo-hint');
     if(!f)return;
     if(h&&h.demo){
-      if(!f.tenant.value)f.tenant.value=demoTenant;
       if(!f.email.value)f.email.value=demoEmail;
       if(!f.password.value)f.password.value=demoPass;
       if(hint)hint.hidden=false;
-      loadLoginBrand();
+      if(!rem.tenant)loadLoginBrand('demo');
       return;
     }
     if(guessDemo){
-      if(f.tenant.value===demoTenant)f.tenant.value='';
       if(f.email.value===demoEmail)f.email.value='';
       if(f.password.value===demoPass)f.password.value='';
       if(hint)hint.hidden=true;
-      loadLoginBrand();
     }
   }).catch(()=>{});
-  document.querySelector('#forgotPassword').onclick=()=>{
-    const box=document.querySelector('#forgotBox');
-    if(box)box.hidden=!box.hidden;
+  const applyPortalSession=(x,remember,email,envKey)=>{
+    const slug=(x.user&&x.user.tenant_slug)||'';
+    if(remember)rememberLogin(email,slug,envKey||'');
+    else clearRememberedLogin();
+    if(x.office)paintLoginBrand(x.office);
+    state.token=x.token;
+    setClientToken(x.token);
+    try{sessionStorage.removeItem('cds_push_modal_skip')}catch{}
+    boot();
   };
-  document.querySelector('#forgotSubmit').onclick=async()=>{
-    const f=document.querySelector('#loginForm');
-    const result=document.querySelector('#forgotResult');
-    const btn=document.querySelector('#forgotSubmit');
-    if(!f||!result)return;
-    const tenant=String(f.tenant.value||'').trim();
-    const email=String(f.email.value||'').trim();
-    if(!tenant||!email){toast('Informe o código do escritório e o e-mail.');return}
-    if(btn){btn.disabled=true;btn.textContent='Enviando...'}
-    try{
-      const r=await fetch('/api/auth/forgot-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenant,email})});
-      const body=await r.json().catch(()=>({}));
-      result.hidden=false;
-      result.textContent=body.message||'Solicitação enviada ao escritório. Aguarde o contato ou o novo convite de acesso.';
-      toast('Solicitação enviada ao escritório. Aguarde o contato ou o novo convite de acesso.','success');
-    }catch{
-      result.hidden=false;
-      result.textContent='Solicitação enviada ao escritório. Aguarde o contato ou o novo convite de acesso.';
-    }finally{
-      if(btn){btn.disabled=false;btn.textContent='Solicitar redefinição'}
+  const showEnvChoice=(payload)=>{
+    pendingChoice=payload;
+    if(loginMain)loginMain.hidden=true;
+    if(envPick)envPick.hidden=false;
+    const preferred=rem.envKey;
+    const envs=(payload.environments||[]).slice().sort((a,b)=>{
+      if(preferred&&a.key===preferred)return -1;
+      if(preferred&&b.key===preferred)return 1;
+      return String(a.name||'').localeCompare(String(b.name||''),'pt-BR');
+    });
+    if(envList){
+      envList.innerHTML=envs.map(env=>{
+        const logo=env.logo_url?`<img class="login-env-logo" src="${esc(env.logo_url)}" alt="">`:'';
+        const cnpj=env.cnpj?`<span class="muted">CNPJ: ${esc(env.cnpj)}</span>`:'';
+        return `<button type="button" class="login-env-card" data-key="${esc(env.key)}">${logo}<div class="login-env-copy"><strong>${esc(env.name||'Contabilidade')}</strong>${cnpj}</div><span class="login-env-go">Entrar →</span></button>`;
+      }).join('');
+      envList.querySelectorAll('[data-key]').forEach(btn=>{
+        btn.onclick=async()=>{
+          const key=btn.getAttribute('data-key');
+          try{
+            const x=await api('/auth/login/choose',{method:'POST',body:JSON.stringify({choice_token:pendingChoice.choice_token,key})});
+            const remember=!!(loginForm&&loginForm.remember&&loginForm.remember.checked);
+            const email=String((loginForm&&loginForm.email&&loginForm.email.value)||'').trim();
+            applyPortalSession(x,remember,email,key);
+          }catch(err){toast(err.message)}
+        };
+      });
     }
   };
-  document.querySelector('#loginForm').onsubmit=async event=>{
+  const backFromEnv=document.querySelector('#backFromEnv');
+  if(backFromEnv)backFromEnv.onclick=()=>{pendingChoice=null;if(loginMain)loginMain.hidden=false;if(envPick)envPick.hidden=true};
+  document.querySelector('#forgotPassword').onclick=async()=>{
+    const f=document.querySelector('#loginForm');
+    const result=document.querySelector('#forgotResult');
+    const btn=document.querySelector('#forgotPassword');
+    if(!f)return;
+    const email=String(f.email.value||'').trim();
+    if(!email){toast('Informe o e-mail.');return}
+    const msg='Enviamos as instruções para o seu e-mail cadastrado. Verifique sua caixa de entrada para criar uma nova senha.';
+    if(btn){btn.disabled=true}
+    try{
+      const r=await fetch('/api/auth/forgot-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+      const body=await r.json().catch(()=>({}));
+      if(result){result.hidden=false;result.textContent=body.message||msg}
+      toast(body.message||msg,'success');
+    }catch{
+      if(result){result.hidden=false;result.textContent=msg}
+      toast(msg,'success');
+    }finally{
+      if(btn){btn.disabled=false}
+    }
+  };
+  loginForm.onsubmit=async event=>{
     event.preventDefault();
     try{
-      const body=Object.fromEntries(new FormData(event.target));
-      const remember=!!body.remember;delete body.remember;
-      const x=await api('/auth/login',{method:'POST',body:JSON.stringify(body)});
-      if(remember)rememberLogin(body.tenant,body.email);
-      else{try{localStorage.removeItem('ccc_last_tenant');localStorage.removeItem('ccc_last_email')}catch{}}
-      state.token=x.token;
-      setClientToken(x.token);
-      try{sessionStorage.removeItem('cds_push_modal_skip')}catch{}
-      // Não pedir permissão aqui: Chrome exige clique explícito (modal após o boot)
-      boot();
+      const fd=new FormData(event.target);
+      const remember=fd.get('remember')==='on';
+      const email=String(fd.get('email')||'').trim();
+      const password=String(fd.get('password')||'');
+      const x=await api('/auth/login',{method:'POST',body:JSON.stringify({email,password})});
+      if(x&&x.needs_environment_choice){showEnvChoice(x);return}
+      applyPortalSession(x,remember,email,'');
     }catch(error){toast(error.message)}
   };
 }
@@ -391,6 +497,7 @@ async function transactionForm(type){
       },
       toast,
       uploadUrl:'/api/client/documentos',
+      deleteUrl:id=>'/api/client/documentos/'+id,
       analyzeUrl:id=>'/api/client/documentos/'+id+'/analise-despesa',
       reanalyzeUrl:id=>'/api/client/documentos/'+id+'/analise-despesa/reler',
       saveUrl:'/api/client/despesas',
@@ -400,7 +507,7 @@ async function transactionForm(type){
   }
   toast('Não foi possível abrir a nova despesa.');
 }
-async function detail(id){try{const x=await api('/client/transacoes/'+id);const locked=x.status==='APPROVED'||x.status==='POSTED'||x.status==='ACCOUNTED';shell(`<div class="topline"><div><div class="eyebrow">Detalhe</div><h1>${esc(x.description)}</h1><p>${x.occurred_on} · ${money(x.amount_cents)}</p></div><button class="btn light" onclick="go('${x.source_type==='EXPENSE'?'expenses':'revenues'}')">Voltar</button></div><div class="panel"><p>Categoria: ${esc(x.category_name||'Outros')} · ${esc(payLabel(x.payment_method||x.receipt_method))} · Banco / Caixa: ${esc(x.bank_name||'Não informado')}</p>${x.notes?`<p>${esc(x.notes)}</p>`:''}<span class="status ${statusTone(x.status)}">${statusLabel(x.status_label||x.status)}</span>${x.document?`<p>📎 ${esc(x.document.original_name)} <button class="btn light" type="button" onclick="viewClientDocument('${x.document.id}','${esc(x.document.original_name)}','${esc(x.document.mime_type||'')}',${x.document.size_bytes||0})">Visualizar</button></p>`:''}${state.canWrite&&!locked?`<button class="btn light" style="margin-top:16px" onclick="editTx('${x.id}','${x.source_type}')">Editar</button>`:locked?'<p class="muted">Movimentação aprovada. Para alterar, utilize uma solicitação.</p>':''}<div class="timeline" style="margin-top:20px">${(x.history||[]).map(h=>`<div><b>${statusLabel(h.status_label||h.status)}</b><br>${h.occurred_on}</div>`).join('')||'<div>Enviada para o escritório.</div>'}</div></div>`)}catch(error){toast(error.message)}}
+async function detail(id){try{portalRemember({fallbackPage:'expenses',label:'Despesas',kind:'detail'});const x=await api('/client/transacoes/'+id);const locked=x.status==='APPROVED'||x.status==='POSTED'||x.status==='ACCOUNTED';shell(`<div class="topline"><div><div class="eyebrow">Detalhe</div><h1>${esc(x.description)}</h1><p>${x.occurred_on} · ${money(x.amount_cents)}</p></div>${portalBackBtn('cdsBack','← Voltar')}</div><div class="panel"><p>Categoria: ${esc(x.category_name||'Outros')} · ${esc(payLabel(x.payment_method||x.receipt_method))} · Banco / Caixa: ${esc(x.bank_name||'Não informado')}</p>${x.notes?`<p>${esc(x.notes)}</p>`:''}<span class="status ${statusTone(x.status)}">${statusLabel(x.status_label||x.status)}</span>${x.document?`<p>📎 ${esc(x.document.original_name)} <button class="btn light" type="button" onclick="viewClientDocument('${x.document.id}','${esc(x.document.original_name)}','${esc(x.document.mime_type||'')}',${x.document.size_bytes||0})">Visualizar</button></p>`:''}${state.canWrite&&!locked?`<button class="btn light" style="margin-top:16px" onclick="editTx('${x.id}','${x.source_type}')">Editar</button>`:locked?'<p class="muted">Movimentação aprovada. Para alterar, utilize uma solicitação.</p>':''}<div class="timeline" style="margin-top:20px">${(x.history||[]).map(h=>`<div><b>${statusLabel(h.status_label||h.status)}</b><br>${h.occurred_on}</div>`).join('')||'<div>Enviada para o escritório.</div>'}</div></div>`);const backPage=x.source_type==='EXPENSE'?'expenses':'revenues';const bb=document.querySelector('#cdsBack');if(bb)bb.onclick=()=>portalGoBack({fallbackPage:backPage,after(){go(backPage)}})}catch(error){toast(error.message)}}
 async function editTx(id,source){const type=source==='EXPENSE'?'despesas':'receitas';const x=await api('/client/transacoes/'+id);[state.categories,state.banks]=await Promise.all([api('/client/categorias'),api('/client/bancos')]);shell(`<form class="form-card" id="editForm"><h1>Editar ${type.slice(0,-1)}</h1><div class="form-grid"><div class="field"><label>Data</label><input type="date" name="occurred_on" value="${esc(x.occurred_on)}" required></div><div class="field"><label>Valor</label><input name="amount" value="${(x.amount_cents/100).toFixed(2).replace('.',',')}" required></div><div class="field full"><label>Descrição</label><input name="description" value="${esc(x.description)}" required></div><div class="field"><label>${type==='despesas'?'Forma de pagamento':'Forma de recebimento'}</label><select name="${type==='despesas'?'payment_method':'receipt_method'}">${payOptions.map(([v,l])=>`<option value="${v}" ${(x.payment_method||x.receipt_method)===v?'selected':''}>${l}</option>`).join('')}</select></div><div class="field"><label>Banco / Caixa</label><select name="bank_id"><option value="">Não informado</option>${state.banks.map(b=>`<option value="${b.id}" ${x.bank_id===b.id?'selected':''}>${esc(b.name)}</option>`).join('')}</select></div><div class="field full"><label>Observação</label><textarea name="notes" rows="3">${esc(x.notes||'')}</textarea></div></div><button class="btn">Salvar</button></form>`);document.querySelector('#editForm').onsubmit=async e=>{e.preventDefault();try{await api('/client/'+type+'/'+id,{method:'PATCH',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});toast('Movimentação atualizada.');detail(id)}catch(error){toast(error.message)}}}
 async function documents(){const f=state.filters.docs||{};const qs=new URLSearchParams(Object.fromEntries(Object.entries(f).filter(([,v])=>v))).toString();const list=await api('/client/documentos'+(qs?'?'+qs:''));shell(`<div class="topline"><div><div class="eyebrow">Arquivos</div><h1>Documentos</h1></div>${state.canWrite?'<button class="btn" id="send">+ Enviar documento</button>':''}</div><form class="filters" id="docFilters"><input type="date" name="from" value="${esc(f.from||'')}"><input type="date" name="to" value="${esc(f.to||'')}"><select name="type"><option value="">Tipo</option><option value="pdf" ${f.type==='pdf'?'selected':''}>PDF</option><option value="image" ${f.type==='image'?'selected':''}>Imagem</option></select><select name="status"><option value="">Situação</option><option value="PENDING_REVIEW" ${f.status==='PENDING_REVIEW'?'selected':''}>Pendente de análise</option><option value="ACTIVE" ${f.status==='ACTIVE'?'selected':''}>Associado</option></select><select name="linked"><option value="">Associado / não associado</option><option value="1" ${f.linked==='1'?'selected':''}>Associado</option><option value="0" ${f.linked==='0'?'selected':''}>Não associado</option></select><button class="btn light" type="submit">Filtrar</button></form><div class="panel table-wrap"><table class="table"><thead><tr><th>Documento</th><th>Origem</th><th>Data</th><th>Tipo</th><th>Movimentação</th><th>Situação</th><th>Ações</th></tr></thead><tbody>${list.map(x=>`<tr><td><div>${esc(x.original_name)}</div><small>${esc(x.source_label||'')}</small></td><td>${esc(x.source_label||'-')}</td><td>${esc(x.created_at)}</td><td>${esc((x.mime_type||'').includes('pdf')?'PDF':'Imagem')}</td><td>${esc(x.movement?.description||'Não associado')}</td><td>${esc(statusLabel(x.status_label||x.status))}</td><td><button class="btn light" data-doc-view="${x.id}" data-doc-name="${esc(x.original_name)}" data-doc-mime="${esc(x.mime_type||'')}" data-doc-size="${x.size_bytes||0}">Visualizar</button> <button class="btn light" data-doc-dl="${x.id}" data-doc-name="${esc(x.original_name)}">Baixar</button>${x.can_delete?` <button class="btn light" data-doc-del="${x.id}">Excluir</button>`:''}</td></tr>`).join('')}</tbody></table>${list.length?'':'<div class="empty">Nenhum documento enviado.</div>'}</div>`);document.querySelector('#docFilters').onsubmit=e=>{e.preventDefault();state.filters.docs=Object.fromEntries(new FormData(e.target));documents()};bindClientDocViewers();document.querySelectorAll('[data-doc-dl]').forEach(btn=>{btn.onclick=()=>downloadClientDocument(btn.dataset.docDl,btn.dataset.docName)});document.querySelectorAll('[data-doc-del]').forEach(btn=>{btn.onclick=()=>confirmClientDocumentDelete(btn.dataset.docDel)});const send=document.querySelector('#send');if(send)send.onclick=()=>documentModal()}
 function confirmClientDocumentDelete(id){root.insertAdjacentHTML('beforeend',`<div class="modal-back" id="modal"><div class="form-card modal-md"><h2>Excluir documento?</h2><p>Você está prestes a excluir este documento. Essa ação será registrada no histórico.</p><div class="form-actions"><button type="button" class="btn light" id="closeDel">Cancelar</button><button type="button" class="btn" id="confirmDocDelete">Excluir documento</button></div></div></div>`);document.querySelector('#closeDel').onclick=()=>document.querySelector('#modal').remove();document.querySelector('#confirmDocDelete').onclick=async()=>{try{await api('/client/documentos/'+id,{method:'DELETE'});toast('Documento excluído.','success');document.querySelector('#modal').remove();documents()}catch(error){toast(error.message)}}}
@@ -417,7 +524,7 @@ async function requests(){
     const last=x.last_message?esc((x.last_message.role==='CLIENT'?'Você: ':'Escritório: ')+String(x.last_message.message||'').slice(0,100)):esc(x.description||'Sem mensagens');
     return `<div class="panel ${unreadRow?'req-row-unread':''}"><span class="status">${statusLabel(x.status)}</span><h2 style="margin-top:12px">${unreadRow?'🔴 ':''}${esc(x.title)}</h2><p>${last}</p><button type="button" class="btn" data-open-req="${esc(x.id)}" style="margin-top:10px">Abrir conversa</button></div>`;
   }).join('')||'<div class="panel empty">Nenhuma solicitação.</div>'}`);
-  document.querySelectorAll('[data-open-req]').forEach(btn=>btn.onclick=()=>{state.requestView=btn.dataset.openReq;requests()});
+  document.querySelectorAll('[data-open-req]').forEach(btn=>btn.onclick=()=>{portalRemember({fallbackPage:'requests',label:'Solicitações',kind:'requestView'});state.requestView=btn.dataset.openReq;requests()});
 }
 async function requestConversation(requestId){
   try{
@@ -433,8 +540,12 @@ async function requestConversation(requestId){
     const composer=closed||!state.canWrite
       ?`<div class="req-composer muted">${closed?'Solicitação encerrada.':'Sem permissão para responder.'}</div>`
       :`<form class="req-composer" id="reqMsgForm"><textarea name="message" rows="2" placeholder="Digite uma mensagem..." required></textarea><button class="btn" type="submit">Enviar</button></form>`;
-    shell(`<div class="req-chat"><div class="req-chat-head"><button type="button" class="btn light" id="reqBack">← Solicitações</button><div><h1>${esc(req.title)}</h1><p>${statusLabel(req.status)}</p></div></div><div class="req-chat-thread" id="reqThread">${bubbles}</div>${composer}</div>`);
-    document.querySelector('#reqBack').onclick=()=>{state.requestView=null;requests()};
+    shell(`<div class="req-chat"><div class="req-chat-head">${portalBackBtn('reqBack','← Solicitações')}<div><h1>${esc(req.title)}</h1><p>${statusLabel(req.status)}</p></div></div><div class="req-chat-thread" id="reqThread">${bubbles}</div>${composer}</div>`);
+    document.querySelector('#reqBack').onclick=()=>portalGoBack({
+      fallbackPage:'requests',
+      clear(){state.requestView=null},
+      after(){requests()}
+    });
     const thread=document.querySelector('#reqThread');if(thread)thread.scrollTop=thread.scrollHeight;
     const form=document.querySelector('#reqMsgForm');
     if(form)form.onsubmit=async e=>{
@@ -455,7 +566,7 @@ async function notifications(){
   let pushInfo={configured:false};
   try{prefs=await api('/push/prefs')}catch{}
   try{pushInfo=await api('/push/public-key')}catch{}
-  shell(`<div class="topline"><div><div class="eyebrow">Avisos</div><h1>Notificações</h1></div><button type="button" class="btn light" id="notifMarkAllPage">Marcar todas</button></div>
+  shell(`<div class="topline"><div><div class="eyebrow">Avisos</div><h1>Histórico de notificações</h1></div><button type="button" class="btn light" id="notifMarkAllPage">Marcar todas</button></div>
     <div class="panel" style="margin-bottom:16px">
       <h2>Preferências</h2>
       <p>Receba avisos do escritório no portal e no navegador.</p>
@@ -469,10 +580,11 @@ async function notifications(){
       </div>
       <p class="muted" style="margin-top:8px">${pushInfo.configured?'VAPID configurado. Ative o push neste dispositivo para receber mensagens do escritório.':'Web Push aguardando chaves VAPID no servidor.'}</p>
     </div>
-    <div class="panel">${list.map(x=>{
+    <div class="panel"><h2 style="margin:0 0 12px">Histórico</h2>${list.map(x=>{
       const company=esc(x.company_name||'');
       const preview=esc(x.preview||x.context||'');
-      return `<div class="notice ${x.read_at?'':'unread'}"><b>${esc(x.title)}</b>${company?`<div class="notif-co">${company}</div>`:''}<p>${esc(x.body||x.message||'')}</p>${preview?`<small class="notif-preview">"${preview}"</small>`:''}<small>${esc(timeAgo(x.created_at)||x.created_at)}</small><div class="row-actions" style="margin-top:8px;display:flex;gap:8px">${!x.read_at?`<button class="btn light" onclick="readNotification('${x.id}')">Marcar como lida</button>`:''}<button class="btn" onclick="openClientNotification('${x.id}')">Abrir</button></div></div>`;
+      const dt=formatClientNotifDateTime(x.created_at);
+      return `<div class="notice ${x.read_at?'':'unread'}"><b>${esc(x.title)}</b>${company?`<div class="notif-co">${company}</div>`:''}<p>${esc(x.body||x.message||'')}</p>${preview?`<small class="notif-preview">"${preview}"</small>`:''}<small>${esc(dt.date)} ${esc(dt.time)} · ${esc(x.type||'-')} · ${x.read_at?'Lida':'Não lida'}</small><div class="row-actions" style="margin-top:8px;display:flex;gap:8px">${!x.read_at?`<button class="btn light" onclick="readNotification('${x.id}')">Marcar como lida</button>`:''}<button class="btn" onclick="openClientNotification('${x.id}')">Abrir</button></div></div>`;
     }).join('')||'<div class="empty">Nenhuma notificação.</div>'}</div>`);
   document.querySelector('#notifMarkAllPage')&&(document.querySelector('#notifMarkAllPage').onclick=async()=>{try{await api('/notificacoes/read-all',{method:'PATCH'});toast('Todas marcadas como lidas.','success');notifications();refreshClientNotifBadge()}catch(error){toast(error.message)}});
   document.querySelector('#savePushPrefs')&&(document.querySelector('#savePushPrefs').onclick=async()=>{
@@ -501,7 +613,23 @@ async function profile(){
   const p=({CLIENT_ADMIN:'Administrador',CLIENT_FINANCE:'Financeiro',CLIENT_VIEWER:'Visualizador'}[state.user.profile]||state.user.profile||'Visualizador');
   shell(`<div class="topline"><div><div class="eyebrow">Conta</div><h1>Meu perfil</h1><p>Seu acesso está vinculado automaticamente à empresa. Você não escolhe empresa neste portal.</p></div></div><div class="panel form-card"><div class="form-grid"><div class="field"><label>Nome</label><input value="${esc(state.user.name)}" disabled></div><div class="field"><label>E-mail</label><input value="${esc(state.user.email)}" disabled></div><div class="field"><label>Perfil</label><input value="${esc(p)}" disabled></div><div class="field"><label>Empresa</label><input value="${esc((state.company&&(state.company.trade_name||state.company.name))||'')}" disabled></div></div></div>
   <div class="panel form-card" style="margin-top:16px"><h2>Notificações push</h2><p>Ative para receber mensagens do escritório com o Portal fechado.</p><button type="button" class="btn" id="enableClientPushProfile" style="margin-top:10px">Ativar push no navegador</button></div>
-  <form class="panel form-card" id="pwForm" style="margin-top:16px"><h2>Alterar senha</h2><div class="form-grid"><div class="field"><label>Senha atual</label><input name="current" type="password" required></div><div class="field"><label>Nova senha</label><input name="password" type="password" required></div></div><button class="btn" style="margin-top:14px">Salvar senha</button></form>`);
+  <form class="panel form-card" id="pwForm" style="margin-top:16px"><h2>Alterar senha</h2><div class="form-grid"><div class="field"><label>Senha atual</label><input name="current" type="password" required></div><div class="field"><label>Nova senha</label><input name="password" type="password" required></div></div><button class="btn" style="margin-top:14px">Salvar senha</button></form>
+  <div class="panel form-card" style="margin-top:16px" id="pinProfilePanel"><h2>PIN de acesso</h2><p class="muted">Código de 4 dígitos para acesso rápido. O PIN nunca é enviado por e-mail.</p><div id="pinProfileForm"></div><p style="margin-top:10px"><button type="button" class="btn light" id="pinForgotProfile">Esqueci meu PIN</button></p></div>`);
+  if(window.CdsAccessPin){
+    const pinBox=document.querySelector('#pinProfileForm');
+    pinBox.innerHTML=CdsAccessPin.formHtml({mode:'change',title:'Alterar PIN',submitLabel:'Salvar novo PIN'});
+    const inner=pinBox.querySelector('.cds-pin-step');
+    if(inner){const h=inner.querySelector('h1');if(h)h.remove();const p=inner.querySelector('p');if(p)p.remove()}
+    CdsAccessPin.bindForm(pinBox,{
+      mode:'change',
+      api,
+      submitLabel:'Salvar novo PIN',
+      onSuccess:()=>{toast('PIN atualizado com sucesso.','success');profile()}
+    });
+  }
+  document.querySelector('#pinForgotProfile')&&(document.querySelector('#pinForgotProfile').onclick=()=>{
+    toast('Use Esqueci minha senha no login para redefinir a senha e cadastrar um novo PIN.','info');
+  });
   document.querySelector('#enableClientPushProfile')&&(document.querySelector('#enableClientPushProfile').onclick=async()=>{
     try{
       if(!window.CdsPush)throw new Error('Cliente Push indisponível.');
@@ -528,7 +656,7 @@ function applyPortalDeepLink(){
     if(page==='solicitacoes'||page==='requests'){state.page='requests';history.replaceState({},'',location.pathname)}
   }catch{}
 }
-window.go=page=>{if(page==='new-expense'){if(!state.canWrite){toast('Você não tem permissão para lançar despesa.');return}transactionForm();return}state.page=page;render()};window.detail=detail;window.editTx=editTx;function viewClientDocument(id,name,mime,size){CdsDocumentViewer.open({fileName:name||'Documento',mimeType:mime,sizeBytes:size,viewUrl:'/api/client/documentos/'+id+'/view',downloadUrl:'/api/client/documentos/'+id+'/download',headers:()=>({Authorization:'Bearer '+state.token})})}function bindClientDocViewers(){document.querySelectorAll('[data-doc-view]').forEach(btn=>{btn.onclick=()=>viewClientDocument(btn.dataset.docView,btn.dataset.docName,btn.dataset.docMime,btn.dataset.docSize)})}window.viewClientDocument=viewClientDocument;window.downloadDoc=viewClientDocument;window.openClientNotification=openClientNotification;window.readNotification=async id=>{try{await api('/notificacoes/'+id+'/read',{method:'PATCH'});await refreshClientNotifBadge();if(state.page==='notifications')notifications()}catch(error){toast(error.message)}};
+window.go=page=>{try{if(window.CdsBackNav&&ROOT_PORTAL_PAGES.has(page))CdsBackNav.clear()}catch{}if(page==='new-expense'){if(!state.canWrite){toast('Você não tem permissão para lançar despesa.');return}transactionForm();return}state.page=page;render()};window.detail=detail;window.editTx=editTx;function viewClientDocument(id,name,mime,size){CdsDocumentViewer.open({fileName:name||'Documento',mimeType:mime,sizeBytes:size,viewUrl:'/api/client/documentos/'+id+'/view',downloadUrl:'/api/client/documentos/'+id+'/download',headers:()=>({Authorization:'Bearer '+state.token})})}function bindClientDocViewers(){document.querySelectorAll('[data-doc-view]').forEach(btn=>{btn.onclick=()=>viewClientDocument(btn.dataset.docView,btn.dataset.docName,btn.dataset.docMime,btn.dataset.docSize)})}window.viewClientDocument=viewClientDocument;window.downloadDoc=viewClientDocument;window.openClientNotification=openClientNotification;window.readNotification=async id=>{try{await api('/notificacoes/'+id+'/read',{method:'PATCH'});await refreshClientNotifBadge();if(state.page==='notifications')notifications()}catch(error){toast(error.message)}};
 if(!window.__cdsPortalPushBound){
   window.__cdsPortalPushBound=true;
   if(navigator.serviceWorker){

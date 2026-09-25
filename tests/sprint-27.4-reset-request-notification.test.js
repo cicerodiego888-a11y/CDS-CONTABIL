@@ -26,7 +26,7 @@ const { app, db, setEmailProvider, EVENT_TYPES } = require('../backend/src/serve
 
 const password = 'Senha@123';
 const newPassword = 'NovaSenha9';
-const GENERIC = /escritório contábil será notificado/i;
+const GENERIC = /Enviamos as instruções para o seu e-mail cadastrado/i;
 let server, base;
 let ownerA, accountantA, staffA, ownerB;
 let companyA1, companyA2, companyB;
@@ -146,30 +146,38 @@ test('1 Cliente solicita recuperação', async () => {
   });
   assert.equal(r.status, 200);
   assert.match(r.data.message, GENERIC);
-  assert.equal(sentMails.length, 0);
+  assert.equal(sentMails.length, 1);
 });
 
-test('2 Solicitação gera notification', async () => {
-  const n = await req('GET', '/api/notificacoes?page=1&page_size=25', undefined, ownerA.token);
-  assert.equal(n.status, 200);
-  const hit = (n.data.items || []).find(x => x.type === EVENT_TYPES.CLIENT_PASSWORD_RESET_REQUESTED && x.entity_id === clientAdmin.user.id);
-  assert.ok(hit, 'notification missing');
-  assert.match(hit.title, /Solicitação de redefinição de acesso/i);
-  assert.match(hit.message, /João Silva solicitou/i);
+test('2 Solicitação gera convite PASSWORD_RESET (e-mail automático)', async () => {
+  const invite = db.prepare(
+    "SELECT purpose,status FROM client_invitations WHERE user_id=? AND purpose='PASSWORD_RESET' ORDER BY created_at DESC LIMIT 1"
+  ).get(clientAdmin.user.id);
+  assert.ok(invite);
+  assert.equal(invite.status, 'PENDING');
 });
 
-test('3 Notification é direcionada ao escritório correto', async () => {
+test('3 Convite pertence à empresa correta', async () => {
+  const invite = db.prepare(
+    "SELECT company_id FROM client_invitations WHERE user_id=? AND purpose='PASSWORD_RESET' ORDER BY created_at DESC LIMIT 1"
+  ).get(clientAdmin.user.id);
+  assert.equal(invite.company_id, companyA1.id);
+});
+
+test('4 Conclusão gera PASSWORD_RESET_COMPLETED com contexto', async () => {
+  const mail = sentMails[sentMails.length - 1];
+  const raw = String((mail && (mail.html || mail.text)) || '');
+  const m = raw.match(/\/convite\/([a-f0-9]{64})/i);
+  assert.ok(m, 'token no e-mail');
+  const acc = await req('POST', '/api/invitations/' + m[1] + '/accept', {
+    password: newPassword, confirmation: newPassword
+  });
+  assert.equal(acc.status, 200);
   const n = await req('GET', '/api/notificacoes', undefined, ownerA.token);
-  const hit = (n.data.items || []).find(x => x.entity_id === clientAdmin.user.id);
-  assert.equal(hit.company_id, companyA1.id);
-});
-
-test('4 Notification contém referência contextual', async () => {
-  const n = await req('GET', '/api/notificacoes', undefined, ownerA.token);
-  const hit = (n.data.items || []).find(x => x.entity_id === clientAdmin.user.id);
+  const hit = (n.data.items || []).find(x => x.type === EVENT_TYPES.PASSWORD_RESET_COMPLETED && x.entity_id === clientAdmin.user.id);
+  assert.ok(hit);
   assert.equal(hit.entity_type, 'client_user');
   assert.equal(hit.target_user_id, clientAdmin.user.id);
-  assert.equal(hit.reference_type, 'CLIENT_USER');
   assert.equal(hit.company_id, companyA1.id);
 });
 
@@ -181,13 +189,13 @@ test('5 Notification não contém senha', async () => {
 test('6 Notification não contém token', async () => {
   const rows = db.prepare(
     "SELECT title,message,context,type FROM notifications WHERE type=? ORDER BY created_at DESC LIMIT 20"
-  ).all(EVENT_TYPES.CLIENT_PASSWORD_RESET_REQUESTED);
+  ).all(EVENT_TYPES.PASSWORD_RESET_COMPLETED);
   assertNoSecrets(rows, 'notif db');
 });
 
-test('7 OWNER recebe', async () => {
+test('7 OWNER recebe PASSWORD_RESET_COMPLETED', async () => {
   const n = await req('GET', '/api/notificacoes', undefined, ownerA.token);
-  assert.ok((n.data.items || []).some(x => x.type === EVENT_TYPES.CLIENT_PASSWORD_RESET_REQUESTED));
+  assert.ok((n.data.items || []).some(x => x.type === EVENT_TYPES.PASSWORD_RESET_COMPLETED));
 });
 
 test('8 ACCOUNTANT recebe', async () => {
@@ -195,31 +203,29 @@ test('8 ACCOUNTANT recebe', async () => {
   assert.ok((n.data.items || []).some(x => x.entity_id === clientAdmin.user.id));
 });
 
-test('9 CLIENT não recebe', async () => {
+test('9 CLIENT não recebe PASSWORD_RESET_COMPLETED', async () => {
   const n = await req('GET', '/api/client/notificacoes', undefined, clientAdmin.token);
   assert.equal(n.status, 200);
   const items = Array.isArray(n.data) ? n.data : (n.data.items || []);
-  assert.equal(items.filter(x => x.type === EVENT_TYPES.CLIENT_PASSWORD_RESET_REQUESTED).length, 0);
+  assert.equal(items.filter(x => x.type === EVENT_TYPES.PASSWORD_RESET_COMPLETED).length, 0);
 });
 
 test('10 CLIENT_VIEWER não recebe', async () => {
   const n = await req('GET', '/api/client/notificacoes', undefined, clientViewer.token);
   const items = Array.isArray(n.data) ? n.data : (n.data.items || []);
-  assert.equal(items.filter(x => x.type === EVENT_TYPES.CLIENT_PASSWORD_RESET_REQUESTED).length, 0);
+  assert.equal(items.filter(x => x.type === EVENT_TYPES.PASSWORD_RESET_COMPLETED).length, 0);
 });
 
 test('11 CLIENT_FINANCE não recebe', async () => {
   const n = await req('GET', '/api/client/notificacoes', undefined, clientFinance.token);
   const items = Array.isArray(n.data) ? n.data : (n.data.items || []);
-  assert.equal(items.filter(x => x.type === EVENT_TYPES.CLIENT_PASSWORD_RESET_REQUESTED).length, 0);
+  assert.equal(items.filter(x => x.type === EVENT_TYPES.PASSWORD_RESET_COMPLETED).length, 0);
 });
 
-test('12 Tenant A não recebe solicitação do Tenant B', async () => {
+test('12 Tenant A não recebe evento do Tenant B no forgot', async () => {
   await req('POST', '/api/auth/forgot-password', { tenant: slugB, email: 'client.s274b@test.local' });
   const nA = await req('GET', '/api/notificacoes', undefined, ownerA.token);
   assert.equal((nA.data.items || []).filter(x => x.entity_id === clientB.user.id).length, 0);
-  const nB = await req('GET', '/api/notificacoes', undefined, ownerB.token);
-  assert.ok((nB.data.items || []).some(x => x.entity_id === clientB.user.id));
 });
 
 test('13 Company A não acessa usuário da Company B', async () => {
@@ -239,7 +245,7 @@ test('13 Company A não acessa usuário da Company B', async () => {
 
 test('14 Clique na notification abre o usuário correto (API context)', async () => {
   const n = await req('GET', '/api/notificacoes', undefined, ownerA.token);
-  const hit = (n.data.items || []).find(x => x.entity_id === clientAdmin.user.id);
+  const hit = (n.data.items || []).find(x => x.type === EVENT_TYPES.PASSWORD_RESET_COMPLETED && x.entity_id === clientAdmin.user.id);
   assert.ok(hit);
   const user = await req('GET', `/api/empresas/${hit.company_id}/users/${hit.target_user_id}`, undefined, ownerA.token);
   assert.equal(user.status, 200);
@@ -249,7 +255,7 @@ test('14 Clique na notification abre o usuário correto (API context)', async ()
 
 test('15 Clique marca notification como lida', async () => {
   const n = await req('GET', '/api/notificacoes', undefined, ownerA.token);
-  const hit = (n.data.items || []).find(x => x.entity_id === clientAdmin.user.id && !x.read_at);
+  const hit = (n.data.items || []).find(x => x.type === EVENT_TYPES.PASSWORD_RESET_COMPLETED && x.entity_id === clientAdmin.user.id && !x.read_at);
   assert.ok(hit);
   const mark = await req('POST', `/api/notificacoes/${hit.id}/lida`, {}, ownerA.token);
   assert.equal(mark.status, 200);
@@ -258,20 +264,11 @@ test('15 Clique marca notification como lida', async () => {
   assert.ok(updated.read_at);
 });
 
-test('16 Não cria duplicidade imediata', async () => {
-  await req('POST', '/api/auth/forgot-password', { tenant: slugA, email: 'finance.s274@test.local' });
-  const countEvents = () => db.prepare(
-    "SELECT COUNT(*) n FROM domain_events WHERE tenant_id=? AND event_type=? AND entity_type='client_user' AND entity_id=?"
-  ).get(ownerA.user.tenant_id, EVENT_TYPES.CLIENT_PASSWORD_RESET_REQUESTED, clientFinance.user.id).n;
-  const before = countEvents();
-  assert.ok(before >= 1);
-  await req('POST', '/api/auth/forgot-password', { tenant: slugA, email: 'finance.s274@test.local' });
-  await req('POST', '/api/auth/forgot-password', { tenant: slugA, email: 'finance.s274@test.local' });
-  assert.equal(countEvents(), before);
-  const unread = db.prepare(
-    "SELECT COUNT(*) n FROM notifications WHERE tenant_id=? AND entity_id=? AND type=? AND read_at IS NULL"
-  ).get(ownerA.user.tenant_id, clientFinance.user.id, EVENT_TYPES.CLIENT_PASSWORD_RESET_REQUESTED).n;
-  assert.ok(unread >= 1);
+test('16 Resposta permanece neutra em cliques repetidos', async () => {
+  const a = await req('POST', '/api/auth/forgot-password', { tenant: slugA, email: 'finance.s274@test.local' });
+  const b = await req('POST', '/api/auth/forgot-password', { tenant: slugA, email: 'finance.s274@test.local' });
+  assert.equal(a.data.message, b.data.message);
+  assert.match(a.data.message, GENERIC);
 });
 
 test('17 Resposta pública não revela se usuário existe', async () => {
@@ -287,10 +284,10 @@ test('17 Resposta pública não revela se usuário existe', async () => {
   assert.doesNotMatch(missing.data.message, /não encontrado|encontrado|cadastrado com sucesso/i);
 });
 
-test('18 E-mail NÃO é enviado apenas pelo Esqueci minha senha', async () => {
+test('18 E-mail É enviado pelo Esqueci minha senha', async () => {
   sentMails = [];
   await req('POST', '/api/auth/forgot-password', { tenant: slugA, email: 'viewer.s274@test.local' });
-  assert.equal(sentMails.length, 0);
+  assert.equal(sentMails.length, 1);
 });
 
 test('19 Contador continua podendo executar Redefinir acesso', async () => {
@@ -339,9 +336,9 @@ test('23 Sessões continuam sendo revogadas', async () => {
   assert.equal(meAfter.status, 401);
 });
 
-test('24 Auditoria é criada', async () => {
+test('24 Auditoria de envio é criada', async () => {
   const rows = db.prepare(
-    "SELECT action, after_json FROM audit_logs WHERE action='CLIENT_PASSWORD_RESET_REQUESTED' ORDER BY created_at DESC LIMIT 20"
+    "SELECT action, after_json FROM audit_logs WHERE action='PASSWORD_RESET_EMAIL_SENT' ORDER BY created_at DESC LIMIT 20"
   ).all();
   assert.ok(rows.length > 0);
   assert.ok(rows.some(r => {
@@ -361,9 +358,10 @@ test('25 Nenhum segredo aparece na resposta', async () => {
 test('26 UI deep-link e forgot-password', () => {
   const portal = fs.readFileSync(path.join(__dirname, '../frontend/public/portal/portal.js'), 'utf8');
   assert.match(portal, /\/api\/auth\/forgot-password/);
-  assert.match(portal, /Solicite a redefinição de acesso/);
+  assert.match(portal, /Enviamos as instruções para o seu e-mail cadastrado/);
+  assert.doesNotMatch(portal, /Solicitar redefinição/);
   const appJs = fs.readFileSync(path.join(__dirname, '../frontend/public/assets/app.js'), 'utf8');
-  assert.match(appJs, /CLIENT_PASSWORD_RESET_REQUESTED/);
+  assert.match(appJs, /PASSWORD_RESET_COMPLETED/);
   assert.match(appJs, /focusClientUserId/);
   assert.match(appJs, /Solicitação de redefinição de acesso/);
 });
@@ -371,7 +369,9 @@ test('26 UI deep-link e forgot-password', () => {
 test('27 STAFF não recebe notificação de reset', async () => {
   const n = await req('GET', '/api/notificacoes', undefined, staffA.token);
   assert.equal(n.status, 200);
-  assert.equal((n.data.items || []).filter(x => x.type === EVENT_TYPES.CLIENT_PASSWORD_RESET_REQUESTED).length, 0);
+  assert.equal((n.data.items || []).filter(x =>
+    x.type === EVENT_TYPES.PASSWORD_RESET_COMPLETED || x.type === EVENT_TYPES.PASSWORD_RESET_FAILED
+  ).length, 0);
 });
 
 test('28 integrity e foreign keys', () => {

@@ -246,7 +246,7 @@ test('422 não invalida a sessão',async()=>{
 
 test('erro de servidor conhecido não exige novo login',async()=>{
   const js=fs.readFileSync(path.join(root,'frontend/public/assets/app.js'),'utf8');
-  assert.match(js,/status===401&&path!=='\/auth\/login'/);
+  assert.match(js,/status===401&&!String\(path\)\.startsWith\('\/auth\/login'\)/);
   assert.match(js,/Não foi possível conectar ao servidor/);
   assert.doesNotMatch(js,/catch\(error\)\{\s*logout\(\)/);
   const r=await req('GET','/api/dashboard',undefined,ownerA.token);

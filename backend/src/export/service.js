@@ -32,6 +32,7 @@ function createExportService(deps) {
   }
 
   const mappings = createMappingService({ db, id });
+  const getPeriodService = () => deps.periodService || null;
 
   function loadPostedEntries(tenantId, companyId, periodStart, periodEnd) {
     const entries = qRows(
@@ -230,6 +231,21 @@ function createExportService(deps) {
       throw Object.assign(new Error('Esta empresa está bloqueada ou indisponível.'), { code: 'COMPANY_UNAVAILABLE', http: 409 });
     }
 
+    // Competência CLOSED bloqueia nova geração (EXPORTADO ≠ FECHADO; FECHADA bloqueia).
+    const periodService = getPeriodService();
+    if (periodService) {
+      const closed = periodService.findClosedForDate(tenantId, companyId, periodStart);
+      if (closed) {
+        throw Object.assign(new Error(periodService.closedMessage(closed.competence)), {
+          code: 'ACCOUNTING_PERIOD_CLOSED',
+          http: 409,
+          details: [{ code: 'ACCOUNTING_PERIOD_CLOSED', competence: closed.competence }],
+          competence: closed.competence,
+          period_id: closed.id
+        });
+      }
+    }
+
     const adapter = registry.get(systemKey);
     if (!adapter) {
       throw Object.assign(new Error('Adapter de exportação não encontrado.'), { code: 'ADAPTER_NOT_FOUND', http: 500 });
@@ -243,10 +259,18 @@ function createExportService(deps) {
       const analysis = analyzeForDominio(tenantId, companyId, entries);
       previewInfo = analysis.preview;
       if (!analysis.preview.can_generate) {
-        const err = Object.assign(new Error(analysis.preview.message || 'Exportação Domínio bloqueada.'), {
-          code: analysis.preview.unmapped_count ? 'UNMAPPED_ACCOUNTS' : 'EXPORT_BLOCKED',
+        const details = analysis.preview.errors || [];
+        const code = analysis.preview.unmapped_count
+          ? 'UNMAPPED_ACCOUNTS'
+          : (analysis.preview.unbalanced_count || analysis.preview.invalid_count
+            ? 'EXPORT_BLOCKED'
+            : 'DOMINIO_EXPORT_BLOCKED');
+        const err = Object.assign(new Error(analysis.preview.message || 'A exportação não pode ser gerada.'), {
+          code,
           http: 422,
-          preview: analysis.preview
+          preview: analysis.preview,
+          details,
+          message: analysis.preview.message || 'A exportação não pode ser gerada.'
         });
         throw err;
       }
@@ -285,6 +309,30 @@ function createExportService(deps) {
       audit(req, 'EXPORT_CREATED', 'EXPORT', x, null, { system_key: systemKey, period_start: periodStart, period_end: periodEnd, count: toExport.length });
     }
 
+    let accountingPeriod = null;
+    const periodServiceForLink = getPeriodService();
+    if (periodServiceForLink) {
+      try {
+        accountingPeriod = periodServiceForLink.linkExportByPeriod(
+          tenantId, companyId, periodStart, periodEnd, x,
+          {
+            userId,
+            req,
+            meta: {
+              file_name: generated.fileName,
+              checksum,
+              entry_count: toExport.length,
+              line_count: generated.lineCount,
+              system_key: systemKey
+            }
+          }
+        );
+      } catch (linkErr) {
+        // Export file already persisted; surface link errors only if period closed mid-flight
+        if (linkErr && linkErr.code === 'ACCOUNTING_PERIOD_CLOSED') throw linkErr;
+      }
+    }
+
     const meta = adapter.metadata();
     return {
       id: x,
@@ -299,7 +347,9 @@ function createExportService(deps) {
       layout_label: meta.layout_label || null,
       compatibility_notice: meta.compatibility_notice || null,
       homologation: meta.homologation || null,
-      preview: previewInfo
+      preview: previewInfo,
+      accounting_period_id: accountingPeriod && accountingPeriod.id || null,
+      accounting_period_status: accountingPeriod && accountingPeriod.status || null
     };
   }
 

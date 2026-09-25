@@ -77,15 +77,15 @@ test('runtime não usa teal como identidade', () => {
   }
 });
 
-test('cache bust s28-4-2', () => {
+test('cache bust s36-2 login', () => {
   const office = read('frontend/public/index.html');
   const portal = read('frontend/public/portal/index.html');
-  assert.match(office, /tokens\.css\?v=s28-4-2/);
-  assert.match(office, /theme\.css\?v=s28-4-2/);
-  assert.match(office, /app\.css\?v=s28-4-2/);
-  assert.match(office, /app\.js\?v=s28-4-2/);
-  assert.match(portal, /portal\.css\?v=s28-4-2/);
-  assert.match(portal, /portal\.js\?v=s28-4-2/);
+  assert.match(office, /tokens\.css\?v=s40-modal/);
+  assert.match(office, /theme\.css\?v=s40-doc-preview/);
+  assert.match(office, /app\.css\?v=s36-2/);
+  assert.match(office, /app\.js\?v=s40-doc-preview/);
+  assert.match(portal, /portal\.css\?v=s40-login/);
+  assert.match(portal, /portal\.js\?v=s40-login/);
 });
 
 test('nenhuma migration de negócio nesta sprint', () => {

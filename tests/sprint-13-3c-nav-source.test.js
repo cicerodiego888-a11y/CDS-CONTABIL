@@ -27,7 +27,8 @@ const sidebarItems = contextMenuGroups.flatMap((g) => g.items.map(([page, label]
 test('1 fonte única contextual é contextMenuGroups', () => {
   assert.equal(js.split('const contextMenuGroups=').length, 2);
   assert.match(js, /function activeNavGroups\(\)\{return state\.selectedCompany\?contextMenuGroups:menuGroups\}/);
-  assert.match(js, /function renderSidebar\(\)\{const groups=activeNavGroups\(\)/);
+  assert.match(js, /function renderSidebar\(\)\s*\{/);
+  assert.match(js, /const groups=activeNavGroups\(\)/);
   assert.doesNotMatch(js, /const menuLabels=/);
 });
 
@@ -118,7 +119,7 @@ test('não duplicação: chips 100% iguais à sidebar contextual', () => {
   );
   assert.deepEqual(
     contextMenuGroups.find((g) => g.title === 'CONTÁBIL').items.map((x) => x[1]),
-    ['Classificação', 'Aprovação', 'Lançamentos', 'Integrações']
+    ['Classificação', 'Lançamentos', 'Aprovação', 'Fechamento Contábil', 'Integrações']
   );
   assert.deepEqual(
     contextMenuGroups.find((g) => g.title === 'IMPORTAÇÃO').items.map((x) => x[1]),

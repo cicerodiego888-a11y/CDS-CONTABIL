@@ -143,7 +143,7 @@ test('10 Item NEEDS_CLASSIFICATION aparece diretamente em Classificação',async
 test('11 Não existe página intermediária Pendente Classificação',()=>{
   assert.doesNotMatch(js,/Pendente Classificação/);
   assert.ok(!ctxItems.some(x=>String(x[1]).includes('Pendente')));
-  assert.match(html,/app\.js\?v=s28-4-2/);
+  assert.match(html,/app\.js\?v=s39-5/);
 });
 
 test('12 Clique Classificar leva diretamente para a classificação',()=>{
@@ -163,7 +163,7 @@ test('13 Contexto da empresa permanece',()=>{
 
 test('14 ← Empresas continua funcionando',()=>{
   assert.match(js,/id="leaveCompany">← Empresas/);
-  assert.match(js,/function leaveCompany\(\)\{state\.selectedCompany=null;state\.page='empresas'/);
+  assert.match(js,/function leaveCompany\(\)\{[\s\S]*?state\.selectedCompany=null;[\s\S]*?state\.page='empresas'/);
 });
 
 test('15 Pendências global continua fora do contexto da empresa',()=>{

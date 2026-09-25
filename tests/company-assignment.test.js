@@ -114,5 +114,5 @@ test('UI e cache expõem o fluxo de designação', () => {
   assert.match(js, /Contabilidade designa cliente para a equipe/);
   assert.match(js, /Designar equipe/);
   assert.match(js, /\/empresas\/'\+id\+'\/responsaveis'/);
-  assert.match(html, /app\.js\?v=s28-4-2/);
+  assert.match(html, /app\.js\?v=s39-5/);
 });

@@ -334,8 +334,9 @@ test('UI Contador e Portal Cliente consomem identidade (sem config no cliente)',
   const appJs = fs.readFileSync(path.join(root, 'frontend/public/assets/app.js'), 'utf8');
   assert.match(appJs, /Identidade do Escritório/);
   assert.match(appJs, /Configure como seu escritório será apresentado aos clientes/);
-  assert.match(appJs, /\/api\/public\/branding\?tenant=/);
   assert.match(appJs, /login-office-logo/);
+  assert.match(appJs, /office\.logo_url|x\.office/);
+  assert.match(appJs, /brand-mark-office/);
   assert.match(appJs, /Alterar logo|Enviar logo/);
   assert.match(appJs, /Remover logo/);
   assert.match(appJs, /5 MB/);

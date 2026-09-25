@@ -89,11 +89,10 @@ Limite: **5 MB** — mensagem: `Arquivo muito grande. O tamanho máximo permitid
 
 ## Login
 
-1. Usuário informa código do escritório.
-2. Front carrega `/api/public/branding?tenant=...`.
-3. Com logo → exibe logo do escritório no card; CDS discreto.
-4. Sem logo → fallback **CDS Contábil Connect**.
-5. Layout: painel institucional CDS à esquerda; card de login com identidade do escritório à direita.
+1. Portal do Cliente: e-mail + senha (Login V2); sem código do escritório.
+2. Branding no card: logo do escritório quando conhecida (último ambiente lembrado via `ccc_last_tenant`, ou após login / escolha de ambiente).
+3. Sem logo conhecida → slot vazio (não usa CDS como marca principal do portal).
+4. API legada: `/api/public/branding?tenant=...` continua disponível para carregar a identidade por slug.
 
 ## Portais
 

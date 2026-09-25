@@ -229,7 +229,7 @@ test('HTTP: login, portal isolado e HTML do escritório com notificações',asyn
   const dash=await req('GET','/api/dashboard',undefined,login.data.token);
   assert.equal(dash.status,200);
   const html=await fetch(base+'/').then(r=>r.text());
-  assert.match(html,/app\.js\?v=s28-4-2/);
+  assert.match(html,/app\.js\?v=s39-5/);
   const js=await fetch(base+'/assets/app.js?v=s13-15').then(r=>r.text());
   assert.match(js,/notif-bell/);
   assert.match(js,/NOTIF_POLL_VISIBLE_MS\s*=\s*5000/);

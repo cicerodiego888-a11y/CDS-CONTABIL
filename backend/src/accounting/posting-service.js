@@ -32,6 +32,14 @@ function createPostingService({id,one,exec,qRows,assertPostableAccount}){
     assertTransition('PENDING','POSTED');
     const totals=assertBalanced(lines);
     for(const l of lines)assertPostableAccount(entry.tenant_id,l.account_id);
+    const src=String(entry.source_type||'').toUpperCase();
+    if(src==='EXPENSE'||src==='REVENUE'||src==='MANUAL'){
+      const debits=lines.filter(l=>l.side==='D');
+      const credits=lines.filter(l=>l.side==='C');
+      if(debits.length===1&&credits.length===1&&debits[0].account_id===credits[0].account_id){
+        throw domainError('Débito e crédito não podem usar a mesma conta nesta operação.','SEMANTIC_INVALID',422);
+      }
+    }
     return{idempotent:false,...totals,lineCount:lines.length};
   }
 

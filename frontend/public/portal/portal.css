@@ -13,9 +13,17 @@ button{cursor:pointer;border:0}
 .portal-office-logo img{max-height:48px;max-width:160px;object-fit:contain;display:block;margin:0 auto 4px;background:var(--color-surface);border-radius:8px;padding:6px}
 .login-office-brand{min-height:48px;display:grid;place-items:center;margin-bottom:12px;text-align:center}
 .login-office-logo{max-height:72px;max-width:220px;object-fit:contain;display:block}
+.login-office-name{font-size:1.05rem;font-weight:700;color:var(--color-text,#111);letter-spacing:.01em}
 .login-cds-fallback{display:grid;justify-items:center;gap:8px;text-align:center}
 .login-cds-mark{width:72px;height:72px;border-radius:16px;object-fit:cover;display:block}
 .login-cds-soft{font-size:11px;margin-top:8px;letter-spacing:.02em}
+.login-env-list{display:grid;gap:10px;margin-top:16px}
+.login-env-card{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;width:100%;padding:12px 14px;border:1px solid var(--color-border,#e5e7eb);border-radius:12px;background:#fff;cursor:pointer;text-align:left;font:inherit;color:inherit}
+.login-env-card:hover{border-color:var(--color-primary,#C8102E)}
+.login-env-logo{width:40px;height:40px;object-fit:contain;border-radius:8px}
+.login-env-copy{display:grid;gap:2px;min-width:0}
+.login-env-copy strong{font-size:.95rem}
+.login-env-go{font-size:.85rem;color:var(--color-primary,#C8102E);white-space:nowrap}
 .nav-links{display:grid;gap:4px}
 .nav-links button{border:0;background:transparent;color:var(--color-sidebar-text);text-align:left;padding:11px 12px;border-radius:12px;font-weight:650}
 .nav-links button:hover:not(.active){background:var(--color-sidebar-hover);color:var(--color-on-primary)}
@@ -41,6 +49,8 @@ button{cursor:pointer;border:0}
 .cds-app-header .user-menu{position:relative}
 .cds-app-header .user-dropdown{position:absolute;right:0;top:48px;z-index:40;min-width:160px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:12px;box-shadow:var(--shadow-sm);padding:6px;display:none;gap:2px}
 .cds-app-header .user-dropdown:not([hidden]){display:grid}
+.more-menu.overlay-menu-open,.user-dropdown.overlay-menu-open,.notif-panel.overlay-menu-open{position:fixed;z-index:80;right:auto}
+.cds-app-header .user-dropdown.overlay-menu-open{display:grid}
 .cds-app-header .user-dropdown button{border:0;background:transparent;text-align:left;padding:10px 12px;border-radius:8px;cursor:pointer;font-weight:650}
 .cds-app-header .user-dropdown button:hover{background:var(--color-surface-hover)}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
@@ -49,6 +59,7 @@ button{cursor:pointer;border:0}
 .notif-badge{position:absolute;top:2px;right:2px;min-width:16px;padding:1px 5px;border-radius:99px;background:var(--color-primary);color:#fff;font-size:10px;font-weight:700}
 .notif-panel{position:absolute;right:0;top:48px;z-index:40;width:360px;max-width:calc(100vw - 24px);background:var(--color-surface);border:1px solid var(--color-border);border-radius:14px;box-shadow:var(--shadow-sm)}
 .notif-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #e8eef7}
+.notif-head-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .notif-list{max-height:380px;overflow:auto}
 .notif-item{display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;padding:12px 14px;border:0;border-bottom:1px solid #f0f4fa;background:#fff;cursor:pointer}
 .notif-item.unread{background:var(--color-primary-soft)}

@@ -17,6 +17,9 @@ function applySchema(db, schemaDir) {
   }
   ensureColumn(db, 'users', 'whatsapp_phone', 'TEXT');
   ensureColumn(db, 'users', 'token_version', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'users', 'pin_hash', 'TEXT');
+  ensureColumn(db, 'users', 'pin_configured_at', 'TEXT');
+  ensureColumn(db, 'users', 'pin_setup_required', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'companies', 'trade_name', 'TEXT');
   ensureColumn(db, 'companies', 'address', 'TEXT');
   ensureColumn(db, 'companies', 'address_number', 'TEXT');
@@ -56,6 +59,12 @@ function applySchema(db, schemaDir) {
   ensureColumn(db, 'companies', 'archived_at', 'TEXT');
   ensureColumn(db, 'companies', 'archived_by', 'TEXT');
   ensureColumn(db, 'companies', 'archive_reason', 'TEXT');
+  ensureColumn(db, 'companies', 'codigo_cliente', 'TEXT');
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_companies_tenant_codigo_cliente
+      ON companies(tenant_id, codigo_cliente)
+      WHERE codigo_cliente IS NOT NULL AND codigo_cliente <> ''`);
+  } catch {}
   db.exec('CREATE INDEX IF NOT EXISTS idx_documents_tenant_company_deleted ON documents(tenant_id,company_id,deleted_at)');
   db.exec("UPDATE documents SET source='OFFICE' WHERE IFNULL(source,'')='' AND uploaded_by IN(SELECT id FROM users WHERE role IN('OWNER','ACCOUNTANT','STAFF')) AND IFNULL(origin,'') NOT IN('CDS_SISTEMAS','IMPORTACAO_CONTABIL','IMPORTACAO_FISCAL','OUTRA_ORIGEM_FUTURA')");
   db.exec("UPDATE documents SET source='CLIENT' WHERE IFNULL(source,'')='' AND uploaded_by IN(SELECT id FROM users WHERE role='CLIENT') AND IFNULL(origin,'') NOT IN('CDS_SISTEMAS','IMPORTACAO_CONTABIL','IMPORTACAO_FISCAL','OUTRA_ORIGEM_FUTURA')");
@@ -113,6 +122,7 @@ function applySchema(db, schemaDir) {
   db.exec(fs.readFileSync(path.join(schemaDir, '021_process_execution.sql'), 'utf8'));
   ensureColumn(db, 'tenant_ai_settings', 'monthly_limit_cents', 'INTEGER');
   ensureColumn(db, 'tenant_ai_settings', 'model_display', 'TEXT');
+  ensureColumn(db, 'tenant_ai_settings', 'autonomy_mode', "TEXT NOT NULL DEFAULT 'ASSISTED_50'");
   ensureColumn(db, 'ai_usage_records', 'user_id', 'TEXT');
   ensureColumn(db, 'ai_usage_records', 'document_id', 'TEXT');
   ensureColumn(db, 'ai_usage_records', 'duration_ms', 'INTEGER');

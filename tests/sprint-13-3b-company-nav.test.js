@@ -126,7 +126,7 @@ test('TEST 16 contexto continua usando a empresa ativa', () => {
 
 test('TEST 17 botão ← Empresas continua funcionando', () => {
   assert.match(js, /id="leaveCompany">← Empresas/);
-  assert.match(js, /function leaveCompany\(\)\{state\.selectedCompany=null;state\.page='empresas'/);
+  assert.match(js, /function leaveCompany\(\)\{[\s\S]*?state\.selectedCompany=null;[\s\S]*?state\.page='empresas'/);
 });
 
 test('TEST 18 badges de classificação/aprovação/pendências continuam', () => {
@@ -140,7 +140,7 @@ test('TEST 18 badges de classificação/aprovação/pendências continuam', () =
 test('organização oficial: grupos, Visão geral, chips alinhados e sem MOVIMENTAÇÕES no contexto', () => {
   assert.deepEqual(Object.keys(groups), ['OPERAÇÃO', 'CONTÁBIL', 'IMPORTAÇÃO', 'ACESSO']);
   assert.deepEqual(labelsOf(groups, 'OPERAÇÃO'), ['Visão geral', 'Despesas', 'Documentos', 'Solicitações']);
-  assert.deepEqual(labelsOf(groups, 'CONTÁBIL'), ['Classificação', 'Aprovação', 'Lançamentos', 'Integrações']);
+  assert.deepEqual(labelsOf(groups, 'CONTÁBIL'), ['Classificação', 'Aprovação', 'Lançamentos', 'Fechamento Contábil', 'Integrações']);
   assert.deepEqual(labelsOf(groups, 'IMPORTAÇÃO'), ['Importações']);
   assert.deepEqual(labelsOf(groups, 'ACESSO'), ['Usuários']);
   assert.doesNotMatch(ctxSrc, /MOVIMENTAÇÕES/);

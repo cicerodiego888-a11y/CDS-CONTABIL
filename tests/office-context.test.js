@@ -173,7 +173,7 @@ test('refresh restaura contexto pela URL e listagem permanece paginada',async()=
   const page=await fetch(base+'/empresas/'+cremolia.id);
   assert.equal(page.status,200);
   const html=await page.text();
-  assert.match(html,/app\.js\?v=s28/);
+  assert.match(html,/app\.js\?v=s39-5/);
   const list=await req('GET','/api/empresas?page=1&page_size=50',undefined,ownerA.token,cremolia.id);
   assert.equal(list.status,200);
   assert.ok(list.data.total>=3);

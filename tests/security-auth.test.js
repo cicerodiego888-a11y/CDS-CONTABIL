@@ -90,16 +90,20 @@ test('mesmo e-mail autentica no tenant correto e falha no outro',async()=>{
   assert.equal(cross.data.message,'Credenciais inválidas.');
 });
 
-test('senha errada, tenant inexistente e ausência de tenant não revelam existência',async()=>{
+test('senha errada, tenant inexistente e ausência de tenant (Login V2)',async()=>{
   const bad=await req('POST','/api/auth/login',{email:'admin@empresa.com',password:'Errada123',tenant:slugA});
   assert.equal(bad.status,401);
   assert.equal(bad.data.message,'Credenciais inválidas.');
   const missing=await req('POST','/api/auth/login',{email:'admin@empresa.com',password,tenant:'nao-existe'});
   assert.equal(missing.status,401);
   assert.equal(missing.data.message,'Credenciais inválidas.');
+  const noneBad=await req('POST','/api/auth/login',{email:'admin@empresa.com',password:'Errada123'});
+  assert.equal(noneBad.status,401);
+  assert.equal(noneBad.data.message,'Credenciais inválidas.');
+  assert.ok(!noneBad.data.environments);
   const none=await req('POST','/api/auth/login',{email:'admin@empresa.com',password});
-  assert.equal(none.status,401);
-  assert.equal(none.data.message,'Credenciais inválidas.');
+  assert.equal(none.status,200);
+  assert.ok(none.data.token||none.data.needs_environment_choice);
 });
 
 test('usuário inativo recebe falha genérica',async()=>{

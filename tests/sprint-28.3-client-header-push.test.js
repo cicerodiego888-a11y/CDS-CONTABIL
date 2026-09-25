@@ -310,6 +310,12 @@ test('20: PWA Cliente + header + integridade', () => {
   assert.equal(m.start_url, '/portal/');
   const html = read('frontend/public/portal/index.html');
   assert.match(html, /cds-app-header\.js/);
+  const office = read('frontend/public/index.html');
+  assert.match(office, /cds-app-header\.js/);
+  const overlay = read('frontend/public/assets/cds-app-header.js');
+  assert.match(overlay, /CdsOverlayMenu/);
+  const portalJs = read('frontend/public/portal/portal.js');
+  assert.match(portalJs, /CdsOverlayMenu/);
   const integrity = db.pragma('integrity_check');
   assert.equal(integrity[0].integrity_check, 'ok');
   const fk = db.pragma('foreign_key_check');

@@ -9,7 +9,7 @@
     "dev": "node --watch backend/src/server.js",
     "setup": "node scripts/setup.js",
     "seed": "node scripts/seed.js && node scripts/seed-client.js",
-    "test": "node --test --test-concurrency=1 tests/*.test.js",
+    "test": "node --require ./scripts/test-env-preload.js --test --test-concurrency=1 tests/*.test.js",
     "backup": "node scripts/backup.js",
     "restore": "node scripts/restore.js",
     "migrate:documents": "node scripts/migrate-documents.js",

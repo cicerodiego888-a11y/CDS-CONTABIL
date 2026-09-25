@@ -56,9 +56,9 @@
   --space-5:20px;
   --space-6:24px;
   --space-8:32px;
-  --modal-sm:480px;
-  --modal-md:720px;
-  --modal-lg:960px;
+  --modal-sm:520px;
+  --modal-md:820px;
+  --modal-lg:1100px;
   --bg:var(--color-background);
   --panel:var(--color-surface);
   --text:var(--color-text);

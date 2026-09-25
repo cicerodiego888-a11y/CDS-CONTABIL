@@ -31,9 +31,11 @@ O texto original retornado pela extração é preservado separadamente dos valor
 
 Os formatos são reconhecidos e aceitos pelo fluxo. Sem OCR dedicado:
 
-- com IA visual habilitada (Sprint 25): interpretação estruturada via provider;
-- sem IA: execução controlada com status `FAILED`, método `OCR_UNAVAILABLE`,
-  código `EXTRACTION_UNAVAILABLE` e preenchimento manual.
+- com IA visual habilitada (Sprint 25): interpretação estruturada via provider
+  (`extraction_method=AI_VISUAL`);
+- sem credencial / IA desligada / limite: status `FAILED`, método `AI_VISUAL`,
+  códigos `AI_NOT_CONFIGURED` | `AI_DISABLED` | `AI_LIMIT_REACHED` e
+  preenchimento manual (mensagens distintas; não confundir com OCR local).
 
 Nenhum serviço externo é chamado quando a IA está desligada.
 

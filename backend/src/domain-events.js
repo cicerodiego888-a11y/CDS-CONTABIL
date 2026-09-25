@@ -7,6 +7,7 @@ const EVENT_TYPES = Object.freeze({
   CLASSIFICATION_REQUIRED: 'CLASSIFICATION_REQUIRED',
   CLASSIFICATION_COMPLETED: 'CLASSIFICATION_COMPLETED',
   ENTRY_CREATED: 'ENTRY_CREATED',
+  APPROVAL_REQUIRED: 'APPROVAL_REQUIRED',
   ENTRY_APPROVED: 'ENTRY_APPROVED',
   ENTRY_POSTED: 'ENTRY_POSTED',
   ENTRY_REJECTED: 'ENTRY_REJECTED',
@@ -27,7 +28,9 @@ const EVENT_TYPES = Object.freeze({
   PROCESS_STEP_COMPLETED: 'PROCESS_STEP_COMPLETED',
   PROCESS_OCCURRENCE_COMPLETED: 'PROCESS_OCCURRENCE_COMPLETED',
   PROCESS_STEP_OVERDUE: 'PROCESS_STEP_OVERDUE',
-  CLIENT_PASSWORD_RESET_REQUESTED: 'CLIENT_PASSWORD_RESET_REQUESTED'
+  CLIENT_PASSWORD_RESET_REQUESTED: 'CLIENT_PASSWORD_RESET_REQUESTED',
+  PASSWORD_RESET_COMPLETED: 'PASSWORD_RESET_COMPLETED',
+  PASSWORD_RESET_FAILED: 'PASSWORD_RESET_FAILED'
 });
 
 const UNIQUE_ONCE = new Set([
@@ -51,6 +54,8 @@ const OFFICE_EVENTS = new Set([
   EVENT_TYPES.REVENUE_CREATED,
   EVENT_TYPES.DOCUMENT_UPLOADED,
   EVENT_TYPES.CLASSIFICATION_REQUIRED,
+  EVENT_TYPES.ENTRY_CREATED,
+  EVENT_TYPES.APPROVAL_REQUIRED,
   EVENT_TYPES.ENTRY_APPROVED,
   EVENT_TYPES.ENTRY_POSTED,
   EVENT_TYPES.ENTRY_REJECTED,
@@ -61,7 +66,9 @@ const OFFICE_EVENTS = new Set([
   EVENT_TYPES.IMPORT_CREATED,
   EVENT_TYPES.IMPORT_COMPLETED,
   EVENT_TYPES.IMPORT_FAILED,
-  EVENT_TYPES.CLIENT_PASSWORD_RESET_REQUESTED
+  EVENT_TYPES.CLIENT_PASSWORD_RESET_REQUESTED,
+  EVENT_TYPES.PASSWORD_RESET_COMPLETED,
+  EVENT_TYPES.PASSWORD_RESET_FAILED
 ]);
 
 const CLIENT_CONFIRM_EVENTS = new Set([
@@ -78,7 +85,7 @@ const PAYLOAD_KEYS = new Set([
   'amount_cents','description','payment_method','receipt_method','method','original_name',
   'status','note','title','imported_rows','total_rows','process_id','occurrence_id','step_id',
   'responsible_user_id','next_responsible_user_id','step_name','process_name','source',
-  'user_name','user_email','target_user_id','reference_type','message_id','preview'
+  'user_name','user_email','target_user_id','reference_type','message_id','preview','note'
 ]);
 
 function moneyLabel(cents){
@@ -118,6 +125,7 @@ function copyFor(eventType, companyName, payload, audience){
     case 'CLASSIFICATION_REQUIRED':return{title:'Classificação pendente',message:`${name} possui uma movimentação aguardando classificação`,context:ctx||payload.description||''};
     case 'CLASSIFICATION_COMPLETED':return{title:'Classificação concluída',message:`Uma movimentação de ${name} foi classificada`,context:payload.description||''};
     case 'ENTRY_CREATED':return{title:'Lançamento gerado',message:`Novo lançamento de ${name}`,context:payload.description||''};
+    case 'APPROVAL_REQUIRED':return{title:'Aprovação pendente',message:'Novo lançamento aguardando aprovação.',context:payload.description||payload.note||''};
     case 'ENTRY_APPROVED':return{title:'Classificação aprovada',message:`Uma classificação de ${name} foi aprovada`,context:payload.description||''};
     case 'ENTRY_POSTED':return{title:'Lançamento efetivado',message:`Um lançamento de ${name} foi gerado após a aprovação`,context:payload.description||''};
     case 'ENTRY_REJECTED':return{title:'Lançamento rejeitado',message:`Um lançamento de ${name} foi rejeitado`,context:payload.note||payload.description||''};
@@ -138,6 +146,22 @@ function copyFor(eventType, companyName, payload, audience){
         context:[name,payload.user_email].filter(Boolean).join(' · ')
       };
     }
+    case 'PASSWORD_RESET_COMPLETED':{
+      const who=payload.user_name||name;
+      return{
+        title:'Senha redefinida com sucesso',
+        message:`${who} concluiu a redefinição de senha no Portal do Cliente.`,
+        context:[name,payload.user_email].filter(Boolean).join(' · ')
+      };
+    }
+    case 'PASSWORD_RESET_FAILED':{
+      const who=payload.user_name||name;
+      return{
+        title:'Falha na redefinição de senha',
+        message:`Não foi possível concluir a redefinição de senha de ${who}.`,
+        context:[name,payload.user_email,payload.note].filter(Boolean).join(' · ')
+      };
+    }
     default:return{title:'Atualização',message:name,context:''};
   }
 }
@@ -150,7 +174,11 @@ function createEventBus({db,id,one,qRows,exec,realtime,notificationService}){
   }
 
   function officeRecipients(tenantId,actorUserId,eventType){
-    if(eventType===EVENT_TYPES.CLIENT_PASSWORD_RESET_REQUESTED){
+    if(
+      eventType===EVENT_TYPES.CLIENT_PASSWORD_RESET_REQUESTED ||
+      eventType===EVENT_TYPES.PASSWORD_RESET_COMPLETED ||
+      eventType===EVENT_TYPES.PASSWORD_RESET_FAILED
+    ){
       return qRows("SELECT id FROM users WHERE tenant_id=? AND role IN('OWNER','ACCOUNTANT') AND active=1",tenantId).map(u=>u.id);
     }
     return qRows("SELECT id FROM users WHERE tenant_id=? AND role IN('OWNER','ACCOUNTANT','STAFF') AND active=1",tenantId).map(u=>u.id);

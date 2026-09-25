@@ -15,6 +15,7 @@ process.env.JWT_SECRET = 'test-sprint-20-secret-ok';
 process.env.DOCUMENT_ENCRYPTION_KEY = 'test-document-encryption-key-32b!!';
 process.env.CDS_COMMS_WORKER = 'off';
 process.env.CDS_PROCESS_SCHEDULER = 'off';
+process.env.CDS_DOCUMENT_PIPELINE = 'off';
 process.env.DEMO_MODE = 'false';
 
 const { app, db, documentStorage, documentIntelligence } = require('../backend/src/server');
@@ -171,7 +172,7 @@ test('PDF textual é extraído e interpretado sem alterar o original', async () 
   assert.deepEqual(documentStorage.readPlain(stored.storage_path), pdf);
 });
 
-test('PNG e JPG são suportados com falha OCR controlada', async () => {
+test('PNG sem IA visual falham com AI_NOT_CONFIGURED (sem OCR local)', async () => {
   for (const [name, buffer, mime] of [
     ['imagem.png', png, 'image/png'],
     ['imagem.jpg', jpg, 'image/jpeg']
@@ -181,8 +182,64 @@ test('PNG e JPG são suportados com falha OCR controlada', async () => {
     assert.equal(request.status, 202);
     const extraction = await waitExtraction(document.id);
     assert.equal(extraction.status, 'FAILED');
-    assert.equal(extraction.extraction_method, 'OCR_UNAVAILABLE');
-    assert.equal(extraction.error_code, 'EXTRACTION_UNAVAILABLE');
+    assert.equal(extraction.extraction_method, 'AI_VISUAL');
+    assert.equal(extraction.error_code, 'AI_NOT_CONFIGURED');
+    assert.match(String(extraction.error_message || ''), /interpretação visual|credencial|OpenAI|manualmente/i);
+    assert.doesNotMatch(String(extraction.error_message || ''), /OCR não está disponível/i);
+  }
+});
+
+test('PNG com IA desligada no escritório falha com AI_DISABLED', async () => {
+  const previous = documentIntelligence.service.setVisualAi({
+    status() { return { available: false, reason: 'AI_DISABLED' }; },
+    available() { return false; },
+    async interpret() { throw new Error('não deveria chamar'); }
+  });
+  try {
+    const document = await upload('taxi-disabled.png', png, 'image/png');
+    const request = await req('POST', `/api/documentos/${document.id}/extracao`, {}, ownerA.token);
+    assert.equal(request.status, 202);
+    const extraction = await waitExtraction(document.id);
+    assert.equal(extraction.status, 'FAILED');
+    assert.equal(extraction.error_code, 'AI_DISABLED');
+    assert.equal(extraction.extraction_method, 'AI_VISUAL');
+    assert.match(String(extraction.error_message || ''), /desligada|Ative a IA/i);
+  } finally {
+    documentIntelligence.service.setVisualAi(previous);
+  }
+});
+
+test('PNG com IA visual configurada extrai via AI_VISUAL', async () => {
+  const previous = documentIntelligence.service.setVisualAi({
+    status() { return { available: true, reason: null }; },
+    available() { return true; },
+    async interpret() {
+      return {
+        fields: {
+          document_type: { value: 'recibo', confidence: 0.9 },
+          issue_date: { value: '2026-09-18', confidence: 0.95 },
+          description: { value: 'Taxi aeroporto', confidence: 0.9 },
+          total_amount: { value: 45.00, confidence: 0.99 },
+          supplier_name: { value: null, confidence: 0 },
+          supplier_document: { value: null, confidence: 0 },
+          document_number: { value: null, confidence: 0 },
+          payment_method: { value: null, confidence: 0 }
+        }
+      };
+    }
+  });
+  try {
+    const document = await upload('taxi-vision.png', png, 'image/png');
+    const request = await req('POST', `/api/documentos/${document.id}/extracao`, {}, ownerA.token);
+    assert.equal(request.status, 202);
+    const extraction = await waitExtraction(document.id);
+    assert.equal(extraction.status, 'EXTRACTED', JSON.stringify(extraction));
+    assert.equal(extraction.extraction_method, 'AI_VISUAL');
+    assert.equal(extraction.fields.total_amount.value, '45.00');
+    assert.equal(extraction.fields.issue_date.value, '2026-09-18');
+    assert.equal(extraction.fields.description.value, 'Taxi aeroporto');
+  } finally {
+    documentIntelligence.service.setVisualAi(previous);
   }
 });
 
