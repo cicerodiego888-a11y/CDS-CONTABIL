@@ -140,6 +140,14 @@ test('10 Item NEEDS_CLASSIFICATION aparece diretamente em Classificação',async
   assert.match(classifSrc,/Classificar →/);
 });
 
+
+test('10b Classificação oferece botão Excluir para itens não classificados',()=>{
+  assert.match(classifSrc,/deleteUnclassifiedEntry/);
+  assert.match(classifSrc,/>Excluir</);
+  assert.match(js,/method:'DELETE'/);
+  assert.match(js,/Só é possível excluir itens que ainda não foram classificados/);
+});
+
 test('11 Não existe página intermediária Pendente Classificação',()=>{
   assert.doesNotMatch(js,/Pendente Classificação/);
   assert.ok(!ctxItems.some(x=>String(x[1]).includes('Pendente')));

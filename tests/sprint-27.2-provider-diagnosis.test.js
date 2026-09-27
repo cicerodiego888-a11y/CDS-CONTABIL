@@ -201,3 +201,39 @@ test('interpretVisual registra FAILED com metadados seguros do provider', async 
     assertNoSecrets(auditPayload);
   }
 });
+
+test('gpt-5.6-terra não envia temperature (evita unsupported_value)', async () => {
+  const {
+    supportsCustomTemperature,
+    buildChatPayload
+  } = require('../backend/src/accounting-ai/openai-provider');
+  assert.equal(supportsCustomTemperature('gpt-5.6-terra'), false);
+  assert.equal(supportsCustomTemperature('gpt-5'), false);
+  assert.equal(supportsCustomTemperature('o3-mini'), false);
+  assert.equal(supportsCustomTemperature('gpt-4o-mini'), true);
+
+  let sent = null;
+  const provider = new OpenAIAccountingProvider({
+    apiKey: 'sk-test-key',
+    model: 'gpt-5.6-terra',
+    fetchImpl: mockFetch(async (_url, options) => {
+      sent = JSON.parse(options.body);
+      return jsonResponse(200, {
+        choices: [{ message: { content: '{"supplier_name":"X","total_amount":"10","issue_date":"2026-01-01"}' } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+      });
+    })
+  });
+  await provider.interpretDocumentImage({
+    mimeType: 'image/png',
+    imageBase64: TINY_PNG_B64,
+    documentId: 'doc-temp'
+  });
+  assert.ok(sent);
+  assert.equal(sent.model, 'gpt-5.6-terra');
+  assert.equal(Object.prototype.hasOwnProperty.call(sent, 'temperature'), false);
+  assert.deepEqual(sent.response_format, { type: 'json_object' });
+
+  const legacy = buildChatPayload('gpt-4o-mini', [{ role: 'user', content: 'x' }]);
+  assert.equal(legacy.temperature, 0);
+});

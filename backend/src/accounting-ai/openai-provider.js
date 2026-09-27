@@ -92,6 +92,30 @@ function attachProviderErrorFields(error, details = {}) {
   return error;
 }
 
+/**
+ * GPT-5 / o-series só aceitam temperature padrão.
+ * Enviar 0 gera 400 unsupported_value e a leitura do documento falha
+ * mesmo com credencial e crédito válidos.
+ */
+function supportsCustomTemperature(model) {
+  const m = String(model || '').toLowerCase();
+  if (!m) return true;
+  if (/^o\d/.test(m)) return false;
+  if (/^gpt-5/.test(m)) return false;
+  if (m.includes('terra')) return false;
+  return true;
+}
+
+function buildChatPayload(model, messages) {
+  const body = {
+    model,
+    response_format: { type: 'json_object' },
+    messages
+  };
+  if (supportsCustomTemperature(model)) body.temperature = 0;
+  return body;
+}
+
 class OpenAIAccountingProvider extends AccountingAIProvider {
   constructor(options = {}) {
     super('openai', options.model || 'gpt-5.6-terra');
@@ -119,6 +143,7 @@ class OpenAIAccountingProvider extends AccountingAIProvider {
     const endpoint = this.chatEndpoint();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const payload = buildChatPayload(this.model, messages);
     let response;
     try {
       response = await this.fetch(endpoint, {
@@ -128,12 +153,7 @@ class OpenAIAccountingProvider extends AccountingAIProvider {
           Authorization: 'Bearer ' + this.apiKey,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          model: this.model,
-          temperature: 0,
-          response_format: { type: 'json_object' },
-          messages
-        })
+        body: JSON.stringify(payload)
       });
     } catch (cause) {
       const error = new Error('Sugestão inteligente indisponível.');
@@ -297,7 +317,7 @@ class OpenAIAccountingProvider extends AccountingAIProvider {
         has_image: hasImage,
         has_text_excerpt: !!textExcerpt,
         response_format: 'json_object',
-        temperature: 0
+        temperature: supportsCustomTemperature(this.model) ? 0 : 'default'
       });
     }
     const userContent = hasImage
@@ -341,5 +361,7 @@ module.exports = {
   sanitizeProviderText,
   attachProviderErrorFields,
   readProviderErrorBody,
-  isAiDebugEnabled
+  isAiDebugEnabled,
+  supportsCustomTemperature,
+  buildChatPayload
 };

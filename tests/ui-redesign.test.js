@@ -11,7 +11,7 @@ test('layout escritório tem sidebar, topbar e conteúdo',()=>{
   const js=read('frontend/public/assets/app.js');
   const html=read('frontend/public/index.html');
   assert.match(html,/tokens\.css\?v=s40-modal/);
-  assert.match(html,/theme\.css\?v=s40-doc-preview/);
+  assert.match(html,/theme\.css\?v=s40-classif-v2/);
   assert.match(js,/app-shell/);
   assert.match(js,/id="sidebar"/);
   assert.match(js,/class="top"/);

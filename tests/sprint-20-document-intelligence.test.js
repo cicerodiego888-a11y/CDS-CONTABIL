@@ -370,4 +370,7 @@ test('interface oferece análise, confiança, correção e confirmação', () =>
   assert.match(source, /Confiança/);
   assert.match(source, /Confirmar dados/);
   assert.match(source, /não cria lançamento contábil/);
+  assert.match(source, /extraction-doc-pane/);
+  assert.match(source, /Recibo \/ original/);
+  assert.match(source, /bindEntryDoc\(\{document:docMeta\}\)/);
 });

@@ -56,6 +56,7 @@ async function uploadImport(buffer, name, token, planName, extra) {
   form.append('file', new Blob([buffer]), name);
   form.append('name', planName || 'Plano teste');
   if (extra && extra.company_id) form.append('company_id', extra.company_id);
+  if (extra && extra.confirm_replace) form.append('confirm_replace', '1');
   const r = await fetch(base + '/api/plano-contas/import', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + token },
@@ -253,12 +254,17 @@ test('importação definitiva após prévia, idempotência de código e isolamen
   const auditRow = db.prepare("SELECT * FROM audit_logs WHERE action='ACCOUNT_PLAN_IMPORTED' AND entity_id=?").get(first.data.planId);
   assert.ok(auditRow);
 
-  const second = await uploadImport(pdf, 'RELAÇÃO DE CONTAS.pdf', ownerA.token, 'Plano SCOSY 2');
-  assert.equal(second.status, 201);
+  const blocked = await uploadImport(pdf, 'RELAÇÃO DE CONTAS.pdf', ownerA.token, 'Plano SCOSY 2');
+  assert.equal(blocked.status, 409, JSON.stringify(blocked.data));
+  assert.equal(blocked.data.error, 'PLAN_EXISTS');
+  assert.equal(blocked.data.can_replace, true);
+  const second = await uploadImport(pdf, 'RELAÇÃO DE CONTAS.pdf', ownerA.token, 'Plano SCOSY 2', { confirm_replace: true });
+  assert.equal(second.status, 201, JSON.stringify(second.data));
   assert.equal(second.data.imported, 683);
   assert.notEqual(second.data.planId, first.data.planId);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM account_plans WHERE tenant_id=?').get(ownerA.user.tenant_id).n, 1);
 
-  const other = await req('GET', '/api/plano-contas/' + first.data.planId + '/accounts', undefined, ownerB.token);
+  const other = await req('GET', '/api/plano-contas/' + second.data.planId + '/accounts', undefined, ownerB.token);
   assert.ok(other.status === 200);
   assert.equal((other.data || []).length, 0);
 
@@ -274,7 +280,10 @@ test('reprocessamento CSV legado', async () => {
   const preview = await uploadPreview(csv, 'plano.csv', ownerA.token);
   assert.equal(preview.status, 200, JSON.stringify(preview.data));
   assert.equal(preview.data.valid, 2);
-  const imp = await uploadImport(csv, 'plano.csv', ownerA.token, 'CSV legado');
+  const blocked = await uploadImport(csv, 'plano.csv', ownerA.token, 'CSV legado');
+  assert.equal(blocked.status, 409, JSON.stringify(blocked.data));
+  assert.equal(blocked.data.error, 'PLAN_EXISTS');
+  const imp = await uploadImport(csv, 'plano.csv', ownerA.token, 'CSV legado', { confirm_replace: true });
   assert.equal(imp.status, 201);
   assert.equal(imp.data.imported, 2);
 });

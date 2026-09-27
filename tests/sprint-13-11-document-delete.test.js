@@ -123,14 +123,16 @@ test('2 OFFICE pode excluir documento OFFICE com permissão', async () => {
   assert.equal(del.data.ok, true);
 });
 
-test('3 e 10 OFFICE/OWNER não pode excluir documento CLIENT', async () => {
-  const del = await req('DELETE', '/api/documentos/' + clientDoc.id, { source: 'OFFICE' }, ownerA.token, companyA.id);
-  assert.equal(del.status, 403);
-  assert.equal(del.data.error, 'DOCUMENT_DELETE_FORBIDDEN_BY_OWNER');
-  assert.match(del.data.message, /enviado pelo cliente/);
-  assert.equal(row(clientDoc.id).deleted_at, null);
-  const denied = audits('DOCUMENT_DELETE_DENIED', clientDoc.id);
-  assert.ok(denied.length >= 1);
+test('3 e 10 OFFICE/OWNER pode excluir documento CLIENT da carteira', async () => {
+  const extra = await uploadClient(joao.token, 'ClienteExcluir.pdf', pdf, 'application/pdf');
+  assert.equal(extra.status, 201, JSON.stringify(extra.data));
+  const list = await req('GET', '/api/documentos?page=1&page_size=100', undefined, ownerA.token, companyA.id);
+  const item = list.data.items.find(x => x.id === extra.data.id);
+  assert.equal(item.source, 'CLIENT');
+  assert.equal(item.can_delete, true);
+  const del = await req('DELETE', '/api/documentos/' + extra.data.id, { source: 'OFFICE' }, ownerA.token, companyA.id);
+  assert.equal(del.status, 200, JSON.stringify(del.data));
+  assert.ok(row(extra.data.id).deleted_at);
 });
 
 test('5 CLIENT_ADMIN pode excluir documento CLIENT', async () => {
@@ -154,21 +156,22 @@ test('7 CLIENT_VIEWER não pode excluir documento CLIENT', async () => {
   assert.equal(row(financeDoc.id).deleted_at, null);
 });
 
-test('8 ACCOUNTANT respeita autorização: exclui OFFICE e não CLIENT', async () => {
+test('8 ACCOUNTANT exclui OFFICE e CLIENT da carteira', async () => {
   const extra = await uploadOffice(accountantA.token, companyA.id, 'Contador.pdf', pdf, 'application/pdf');
   const ok = await req('DELETE', '/api/documentos/' + extra.data.id, undefined, accountantA.token, companyA.id);
   assert.equal(ok.status, 200);
-  const no = await req('DELETE', '/api/documentos/' + clientDoc.id, undefined, accountantA.token, companyA.id);
-  assert.equal(no.status, 403);
-  assert.equal(no.data.error, 'DOCUMENT_DELETE_FORBIDDEN_BY_OWNER');
+  const clientExtra = await uploadClient(joao.token, 'AccCliente.pdf', pdf, 'application/pdf');
+  const okClient = await req('DELETE', '/api/documentos/' + clientExtra.data.id, undefined, accountantA.token, companyA.id);
+  assert.equal(okClient.status, 200, JSON.stringify(okClient.data));
 });
 
-test('9 STAFF respeita autorização: exclui OFFICE e não CLIENT', async () => {
+test('9 STAFF exclui OFFICE e CLIENT da carteira', async () => {
   const extra = await uploadOffice(staffA.token, companyA.id, 'Staff.pdf', pdf, 'application/pdf');
   const ok = await req('DELETE', '/api/documentos/' + extra.data.id, undefined, staffA.token, companyA.id);
   assert.equal(ok.status, 200);
-  const no = await req('DELETE', '/api/documentos/' + clientDoc.id, undefined, staffA.token, companyA.id);
-  assert.equal(no.status, 403);
+  const clientExtra = await uploadClient(joao.token, 'StaffCliente.pdf', pdf, 'application/pdf');
+  const okClient = await req('DELETE', '/api/documentos/' + clientExtra.data.id, undefined, staffA.token, companyA.id);
+  assert.equal(okClient.status, 200, JSON.stringify(okClient.data));
 });
 
 test('12-22 exclusão OFFICE preenche soft delete, some da listagem, permanece no banco e na auditoria', async () => {
@@ -250,7 +253,7 @@ test('26 exclusão repetida é idempotente', async () => {
   assert.equal(audits('DOCUMENT_DELETED', extra.data.id).length, 1);
 });
 
-test('27 documento IMPORT não pode ser excluído; origem insegura sem uploaded_by conhecido também não', async () => {
+test('27 documento IMPORT e origem indefinida podem ser excluídos pelo escritório', async () => {
   const importId = crypto.randomUUID();
   db.prepare('INSERT INTO documents(id,tenant_id,company_id,original_name,storage_path,mime_type,size_bytes,sha256,uploaded_by,status,origin,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(importId, ownerA.user.tenant_id, companyA.id, 'import.pdf', path.join(os.tmpdir(), 'missing.pdf'), 'application/pdf', 10, 'x', ownerA.user.id, 'ACTIVE', 'IMPORTACAO_CONTABIL', 'IMPORT');
@@ -258,12 +261,11 @@ test('27 documento IMPORT não pode ser excluído; origem insegura sem uploaded_
   db.prepare('INSERT INTO documents(id,tenant_id,company_id,original_name,storage_path,mime_type,size_bytes,sha256,uploaded_by,status,origin,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(unknownId, ownerA.user.tenant_id, companyA.id, 'legado.pdf', path.join(os.tmpdir(), 'missing2.pdf'), 'application/pdf', 10, 'y', 'user-inexistente', 'ACTIVE', 'PORTAL_CLIENTE', null);
   const imp = await req('DELETE', '/api/documentos/' + importId, undefined, ownerA.token, companyA.id);
-  assert.equal(imp.status, 403);
-  assert.equal(imp.data.error, 'DOCUMENT_DELETE_FORBIDDEN_BY_OWNER');
+  assert.equal(imp.status, 200, JSON.stringify(imp.data));
   const unk = await req('DELETE', '/api/documentos/' + unknownId, undefined, ownerA.token, companyA.id);
-  assert.equal(unk.status, 403);
-  assert.equal(row(importId).deleted_at, null);
-  assert.equal(row(unknownId).deleted_at, null);
+  assert.equal(unk.status, 200, JSON.stringify(unk.data));
+  assert.ok(row(importId).deleted_at);
+  assert.ok(row(unknownId).deleted_at);
 });
 
 test('legado: uploaded_by do escritório libera exclusão OFFICE; uploaded_by CLIENT libera no portal', async () => {
@@ -279,7 +281,7 @@ test('legado: uploaded_by do escritório libera exclusão OFFICE; uploaded_by CL
   assert.equal(oItem.source, 'OFFICE');
   assert.equal(oItem.can_delete, true);
   assert.equal(cItem.source, 'CLIENT');
-  assert.equal(cItem.can_delete, false);
+  assert.equal(cItem.can_delete, true);
   const clientList = await req('GET', '/api/client/documentos', undefined, joao.token);
   const cMine = clientList.data.find(x => x.id === clientLegacy);
   const cOffice = clientList.data.find(x => x.id === officeLegacy);
@@ -292,7 +294,8 @@ test('legado: uploaded_by do escritório libera exclusão OFFICE; uploaded_by CL
 });
 
 test('28-30 frontend não burla source, company_id nem tenant_id', async () => {
-  const spoof = await req('DELETE', '/api/documentos/' + clientDoc.id, {
+  const spoofTarget = await uploadClient(joao.token, 'Spoof.pdf', pdf, 'application/pdf');
+  const spoof = await req('DELETE', '/api/documentos/' + spoofTarget.data.id, {
     source: 'OFFICE',
     origin: 'PORTAL_ESCRITORIO',
     tenant_id: ownerA.user.tenant_id,
@@ -300,8 +303,9 @@ test('28-30 frontend não burla source, company_id nem tenant_id', async () => {
     user_id: ownerA.user.id,
     role: 'OWNER'
   }, ownerA.token, companyA.id);
-  assert.equal(spoof.status, 403);
-  assert.equal(spoof.data.error, 'DOCUMENT_DELETE_FORBIDDEN_BY_OWNER');
+  // spoof do body é ignorado; exclusão pelo escritório é permitida pela política atual
+  assert.equal(spoof.status, 200, JSON.stringify(spoof.data));
+  assert.equal(row(spoofTarget.data.id).source, 'CLIENT');
   const clientSpoof = await req('DELETE', '/api/client/documentos/' + officeDoc.id, {
     source: 'CLIENT',
     tenant_id: ownerB.user.tenant_id,
@@ -331,7 +335,7 @@ test('listagens do escritório e do cliente expõem can_delete pela propriedade'
   const ofClient = office.data.items.find(x => x.id === clientDoc.id);
   assert.equal(ofOffice.can_delete, true);
   assert.equal(ofOffice.source_label, 'Enviado pelo escritório');
-  assert.equal(ofClient.can_delete, false);
+  assert.equal(ofClient.can_delete, true);
   assert.equal(ofClient.source_label, 'Enviado pelo cliente');
   const client = await req('GET', '/api/client/documentos', undefined, joao.token);
   const cOffice = client.data.find(x => x.id === officeDoc.id);
@@ -350,7 +354,8 @@ test('módulo de propriedade e UI em português', () => {
   assert.equal(documentOwnership.resolveSource({ origin: 'PORTAL_CLIENTE' }), null);
   assert.equal(documentOwnership.resolveSource({ origin: 'PORTAL_CLIENTE', uploaded_by_role: 'OWNER' }), 'OFFICE');
   assert.equal(documentOwnership.resolveSource({ origin: 'PORTAL_CLIENTE', uploaded_by_role: 'CLIENT' }), 'CLIENT');
-  assert.equal(documentOwnership.canDelete({ user: { role: 'OWNER' }, document: { source: 'CLIENT' } }).code, 'DOCUMENT_DELETE_FORBIDDEN_BY_OWNER');
+  assert.equal(documentOwnership.canDelete({ user: { role: 'OWNER' }, document: { source: 'CLIENT' } }).ok, true);
+  assert.equal(documentOwnership.canDelete({ user: { role: 'CLIENT' }, document: { source: 'OFFICE' }, hasClientPermission: () => true }).code, 'DOCUMENT_DELETE_FORBIDDEN_BY_OWNER');
   const office = read('frontend/public/assets/app.js');
   const portal = read('frontend/public/portal/portal.js');
   assert.match(office, />Excluir</);

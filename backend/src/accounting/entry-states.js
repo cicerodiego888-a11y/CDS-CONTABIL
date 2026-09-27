@@ -38,6 +38,10 @@ function canReclassify(status){
   return status==='NEEDS_CLASSIFICATION'||status===PENDING_APPROVAL||status==='REJECTED';
 }
 
+function canDeleteUnclassified(status){
+  return status==='NEEDS_CLASSIFICATION';
+}
+
 function canTransition(from,to){
   return (ALLOWED[from]||[]).includes(to);
 }
@@ -62,6 +66,7 @@ module.exports={
   canApprove,
   canReject,
   canReclassify,
+  canDeleteUnclassified,
   canTransition,
   assertTransition
 };

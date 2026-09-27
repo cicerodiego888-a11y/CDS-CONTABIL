@@ -209,7 +209,10 @@ function createSmartExpenseService({
     return best;
   }
 
-  function waitForExtraction(tenantId, documentId, timeoutMs = 8000) {
+  /** Visão IA (JPEG/PNG) costuma levar 5–20s; 8s gerava análise vazia com EXTRACTION_NOT_REVIEWED. */
+  const EXTRACTION_WAIT_MS = 45000;
+
+  function waitForExtraction(tenantId, documentId, timeoutMs = EXTRACTION_WAIT_MS) {
     return new Promise(resolve => {
       const started = Date.now();
       const tick = () => {
@@ -217,10 +220,27 @@ function createSmartExpenseService({
         if (!extraction) return resolve(null);
         if (!['PENDING', 'PROCESSING'].includes(extraction.status)) return resolve(extraction);
         if (Date.now() - started >= timeoutMs) return resolve(extraction);
-        setTimeout(tick, 40);
+        setTimeout(tick, 150);
       };
       tick();
     });
+  }
+
+  function coreFieldsReady(fields) {
+    return !!(fields && (fields.supplier_name && fields.supplier_name.value ||
+      fields.description && fields.description.value) &&
+      fields.occurred_on && fields.occurred_on.value &&
+      fields.amount && fields.amount.value);
+  }
+
+  function analysisFieldsEmpty(row) {
+    if (!row) return true;
+    try {
+      const parsed = JSON.parse(row.fields_json || '{}');
+      return !Object.values(parsed).some(f => f && f.value != null && String(f.value).trim() !== '');
+    } catch {
+      return true;
+    }
   }
 
   async function runPipeline(tenantId, documentId, userId, analysisId, force) {
@@ -239,6 +259,10 @@ function createSmartExpenseService({
     try {
       extractionService.request(tenantId, documentId, userId, { force: !!force });
       extraction = await waitForExtraction(tenantId, documentId);
+      // Se ainda processando no limite, dá uma última chance (evita gravar PARTIAL vazio).
+      if (extraction && ['PENDING', 'PROCESSING'].includes(extraction.status)) {
+        extraction = await waitForExtraction(tenantId, documentId, 15000) || extraction;
+      }
     } catch (error) {
       run(
         `UPDATE expense_document_analyses SET status='FAILED',error_code=?,
@@ -252,7 +276,13 @@ function createSmartExpenseService({
       return;
     }
 
-    const fields = mapExtractionFields(extraction);
+    let fields = mapExtractionFields(extraction);
+    // Extração concluiu depois do poll: recarrega campos antes de classificar.
+    if (!coreFieldsReady(fields) && extraction &&
+        ['EXTRACTED', 'REVIEWED'].includes(extraction.status)) {
+      extraction = extractionService.get(tenantId, documentId) || extraction;
+      fields = mapExtractionFields(extraction);
+    }
     let classificationSource = 'NONE';
     let classificationStatus = null;
     let classificationConfidence = 0;
@@ -266,6 +296,9 @@ function createSmartExpenseService({
     if (!extraction || extraction.status === 'FAILED') {
       status = 'PARTIAL';
       errorCode = extraction && extraction.error_code || 'EXTRACTION_FAILED';
+    } else if (['PENDING', 'PROCESSING'].includes(extraction.status)) {
+      status = 'PARTIAL';
+      errorCode = 'EXTRACTION_TIMEOUT';
     } else {
       const description = fields.description.value || fields.supplier_name.value || '';
       const payment = fields.payment_method.value || 'OUTRO';
@@ -294,7 +327,8 @@ function createSmartExpenseService({
           document_id: documentId, company_id: document.company_id,
           score: cls.score || null, origin: cls.origin || null
         });
-      } else if (aiGate(tenantId).available && accountingAIService &&
+      } else if (['EXTRACTED', 'REVIEWED'].includes(extraction.status) &&
+                 aiGate(tenantId).available && accountingAIService &&
                  accountingAIService.providerInfo().configured) {
         try {
           const ai = await accountingAIService.requestClassification(
@@ -330,14 +364,19 @@ function createSmartExpenseService({
               document_id: documentId, company_id: document.company_id,
               error_code: suggestion && suggestion.error_code || 'AI_UNAVAILABLE'
             });
-            errorCode = suggestion && suggestion.error_code || 'AI_UNAVAILABLE';
+            // Não mascara campos já extraídos com erro de classificação.
+            if (!coreFieldsReady(fields)) {
+              errorCode = suggestion && suggestion.error_code || 'AI_UNAVAILABLE';
+            }
           }
         } catch (error) {
           audit(tenantId, userId, 'AI_CLASSIFICATION_FAILED', 'EXPENSE_ANALYSIS', analysisId, {
             document_id: documentId, company_id: document.company_id,
             error_code: error.code || 'AI_PROVIDER_ERROR'
           });
-          errorCode = error.code || 'AI_PROVIDER_ERROR';
+          if (!coreFieldsReady(fields)) {
+            errorCode = error.code || 'AI_PROVIDER_ERROR';
+          }
         }
       } else {
         classificationStatus = cls && cls.status || 'NEEDS_CLASSIFICATION';
@@ -345,9 +384,7 @@ function createSmartExpenseService({
         classificationReason = cls && cls.reason || null;
       }
 
-      const coreReady = !!(fields.supplier_name.value || fields.description.value) &&
-        !!fields.occurred_on.value && !!fields.amount.value;
-      status = coreReady ? 'READY' : 'PARTIAL';
+      status = coreFieldsReady(fields) ? 'READY' : 'PARTIAL';
     }
 
     run(
@@ -389,7 +426,28 @@ function createSmartExpenseService({
 
     const existing = analysisRow(tenantId, documentId);
     if (existing && !options.force && existing.status !== 'PROCESSING') {
-      return { analysis: publicAnalysis(existing), created: false, already_exists: true };
+      const extraction = extractionService.get(tenantId, documentId);
+      const staleEmpty = analysisFieldsEmpty(existing) &&
+        ['PARTIAL', 'FAILED'].includes(existing.status) &&
+        extraction && ['EXTRACTED', 'REVIEWED'].includes(extraction.status);
+      if (!staleEmpty) {
+        return { analysis: publicAnalysis(existing), created: false, already_exists: true };
+      }
+      // Análise vazia por timeout anterior; extração já está pronta — remapeia sem nova chamada à IA.
+      run(
+        `UPDATE expense_document_analyses SET
+           status='PROCESSING',error_code=NULL,requested_by=?,
+           requested_at=CURRENT_TIMESTAMP,completed_at=NULL,updated_at=CURRENT_TIMESTAMP
+         WHERE id=?`,
+        userId, existing.id
+      );
+      await runPipeline(tenantId, documentId, userId, existing.id, false);
+      return {
+        analysis: getAnalysis(tenantId, documentId),
+        created: false,
+        already_exists: true,
+        healed: true
+      };
     }
     if (existing && existing.status === 'PROCESSING' && !options.force) {
       return { analysis: publicAnalysis(existing), created: false, already_exists: true };

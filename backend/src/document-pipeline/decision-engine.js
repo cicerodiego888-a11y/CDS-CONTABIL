@@ -49,6 +49,61 @@ function createDecisionEngine({
     return scored.slice(0, limit);
   }
 
+  /**
+   * A Accounting AI devolve primary_account (+ banco/categoria), não D/C.
+   * Monta o par contábil como em preparation(): despesa D=primária C=banco.
+   */
+  function accountsFromAiSuggestion(sug, bank, nature) {
+    if (!sug) return null;
+    const payload = sug.suggestion || sug;
+    const primaryId = payload.primary_account_id
+      || (payload.primary_account && payload.primary_account.id)
+      || payload.debit_account_id
+      || payload.suggested_debit_account_id
+      || null;
+    const creditFromSug = payload.credit_account_id || payload.suggested_credit_account_id || null;
+    let bankAcc = creditFromSug
+      || (bank && (bank.account_id || bank.accounting_account_id))
+      || null;
+    if (!bankAcc && payload.bank && payload.bank.id) {
+      const bankRow = one(
+        `SELECT account_id FROM banks WHERE id=? AND active=1`,
+        payload.bank.id
+      );
+      bankAcc = bankRow && bankRow.account_id || null;
+    }
+    if (!bankAcc && payload.suggested_bank_id) {
+      const bankRow = one(
+        `SELECT account_id FROM banks WHERE id=? AND active=1`,
+        payload.suggested_bank_id
+      );
+      bankAcc = bankRow && bankRow.account_id || null;
+    }
+    if (!primaryId || !bankAcc || primaryId === bankAcc) return null;
+
+    const op = String(
+      (nature && nature.operation_type) ||
+      payload.operation_type ||
+      payload.suggested_operation_type ||
+      'DESPESA'
+    ).toUpperCase();
+    const isRevenue = op === 'REVENUE' || op === 'RECEITA' || op === 'VENDA';
+    return {
+      debit_account_id: isRevenue ? bankAcc : primaryId,
+      credit_account_id: isRevenue ? primaryId : bankAcc,
+      confidence: Number(payload.confidence || 0.8),
+      reason: payload.reason || payload.explanation || 'Conta principal da IA + banco/caixa.',
+      category_id: (payload.category && payload.category.id)
+        || payload.suggested_category_id
+        || null,
+      bank_id: (payload.bank && payload.bank.id)
+        || payload.suggested_bank_id
+        || (bank && bank.id)
+        || null,
+      primary_account_id: primaryId
+    };
+  }
+
   function priorSupplierAccounts(tenantId, companyId, supplier) {
     if (typeof findSupplierPriorEntries === 'function') {
       return findSupplierPriorEntries(tenantId, companyId, supplier) || null;
@@ -149,7 +204,46 @@ function createDecisionEngine({
       }
     }
 
-    // Se regra/histórico não resolveram, no modo 98% tenta capacidades avançadas
+    // Tentativa 2b — sugestão IA já obtida (primary_account + banco → D/C)
+    // Vale nos dois modos: preparação com BUILD_ENTRY / SUGGEST_DEBIT+CREDIT.
+    if (classification.status !== 'CLASSIFIED' && policy.allows('BUILD_ENTRY')) {
+      const fromAi = accountsFromAiSuggestion(aiSuggestion, bank, nature);
+      if (fromAi) {
+        classification = {
+          status: 'CLASSIFIED',
+          debit_account_id: fromAi.debit_account_id,
+          credit_account_id: fromAi.credit_account_id,
+          confidence: fromAi.confidence,
+          origin: 'AI_PRIMARY',
+          reason: fromAi.reason
+        };
+        if (fromAi.category_id && !category) {
+          category = one(
+            `SELECT id,name,account_id FROM categories WHERE id=? AND active=1`,
+            fromAi.category_id
+          ) || category;
+        }
+        if (fromAi.bank_id && (!bank || !bank.account_id)) {
+          bank = one(
+            `SELECT id,account_id,name FROM banks WHERE id=? AND active=1`,
+            fromAi.bank_id
+          ) || bank;
+        }
+        pushAttempt('AI_PRIMARY_ACCOUNT', {
+          ok: true,
+          primary_account_id: fromAi.primary_account_id,
+          debit_account_id: fromAi.debit_account_id,
+          credit_account_id: fromAi.credit_account_id
+        });
+      } else if (aiSuggestion) {
+        pushAttempt('AI_PRIMARY_ACCOUNT', {
+          ok: false,
+          reason: 'IA sem par débito/crédito (primary + banco distintos).'
+        });
+      }
+    }
+
+    // Se regra/histórico/IA não resolveram, no modo 98% tenta capacidades avançadas
     // mesmo quando o CDS já sugeriu algo — só se ainda não CLASSIFIED.
     // Se já CLASSIFIED por regra/histórico no 98%, registra e segue (sem loop).
     if (classification.status === 'CLASSIFIED' && policy.isAssisted()) {
@@ -243,7 +337,7 @@ function createDecisionEngine({
           accountingAIService &&
           typeof accountingAIService.requestClassification === 'function') {
         try {
-          const sug = await accountingAIService.requestClassification(tenantId, documentId, actorId, {
+          const raw = await accountingAIService.requestClassification(tenantId, documentId, actorId, {
             force: false,
             allowUnreviewed: true,
             expanded_context: true,
@@ -260,34 +354,36 @@ function createDecisionEngine({
               }
             }
           });
-          if (sug && (sug.debit_account_id || sug.suggested_debit_account_id) &&
-              (sug.credit_account_id || sug.suggested_credit_account_id)) {
+          const sug = raw && (raw.suggestion || raw);
+          aiSuggestion = sug || aiSuggestion;
+          const fromExpanded = accountsFromAiSuggestion(sug, bank, nature);
+          if (fromExpanded) {
             classification = {
               status: 'CLASSIFIED',
-              debit_account_id: sug.debit_account_id || sug.suggested_debit_account_id,
-              credit_account_id: sug.credit_account_id || sug.suggested_credit_account_id,
-              confidence: Number(sug.confidence || 0.8),
+              debit_account_id: fromExpanded.debit_account_id,
+              credit_account_id: fromExpanded.credit_account_id,
+              confidence: fromExpanded.confidence,
               origin: 'AI_EXPANDED',
               reason: sug.reason || sug.explanation || 'IA com contexto ampliado.',
               candidates: sug.candidates || []
             };
-            aiSuggestion = {
-              operation_type: sug.operation_type || sug.suggested_operation_type || (nature && nature.operation_type),
-              confidence: sug.confidence,
-              reason: sug.reason || sug.explanation,
-              candidates: sug.candidates || []
-            };
+            if (fromExpanded.category_id && !category) {
+              category = one(
+                `SELECT id,name,account_id FROM categories WHERE id=? AND active=1`,
+                fromExpanded.category_id
+              ) || category;
+            }
+            if (fromExpanded.bank_id) {
+              bank = one(
+                `SELECT id,account_id,name FROM banks WHERE id=? AND active=1`,
+                fromExpanded.bank_id
+              ) || bank;
+            }
             pushAttempt('EXPANDED_AI', { ok: true, confidence: classification.confidence });
-          } else if (sug && (sug.operation_type || sug.suggested_operation_type)) {
-            aiSuggestion = {
-              operation_type: sug.operation_type || sug.suggested_operation_type,
-              confidence: sug.confidence,
-              reason: sug.reason || sug.explanation,
-              candidates: sug.candidates || []
-            };
+          } else if (sug && (sug.operation_type || sug.suggested_operation_type || sug.primary_account)) {
             pushAttempt('EXPANDED_AI', {
               ok: false,
-              reason: 'IA retornou natureza sem contas válidas do plano.'
+              reason: 'IA retornou natureza/conta sem par débito/crédito válido no plano.'
             });
           } else {
             pushAttempt('EXPANDED_AI', { ok: false, reason: 'IA sem sugestão utilizável.' });
@@ -355,7 +451,7 @@ function createDecisionEngine({
     };
   }
 
-  return { resolve, fuzzyChartAccounts, priorSupplierAccounts };
+  return { resolve, fuzzyChartAccounts, priorSupplierAccounts, accountsFromAiSuggestion };
 }
 
 module.exports = { createDecisionEngine };

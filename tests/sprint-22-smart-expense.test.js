@@ -411,7 +411,7 @@ test('CASO 8 motor CDS falha e IA desligada permite continuar', async () => {
   assert.equal(saved.data.status, 'NEEDS_CLASSIFICATION');
 });
 
-test('CASO 9 falha da IA não bloqueia lançamento', async () => {
+test('CASO 9 falha da IA de classificação não bloqueia lançamento nem apaga campos extraídos', async () => {
   setAccountingAIProvider(mock);
   mock.calls = 0;
   mock.classification = Object.assign(new Error('timeout'), {
@@ -436,9 +436,11 @@ test('CASO 9 falha da IA não bloqueia lançamento', async () => {
   assert.equal(result.status, 201, JSON.stringify(result.data));
   assert.ok(mock.calls >= 1);
   assert.equal(result.data.analysis.ai_used, false);
+  // Extração textual preencheu os campos; falha só na classificação contábil.
+  assert.ok(result.data.analysis.fields.amount.value || result.data.analysis.fields.supplier_name.value);
   assert.match(
     result.data.analysis.banner,
-    /Não foi possível (concluir a análise inteligente|interpretar automaticamente este documento)|Revise os dados manualmente/
+    /Preenchido automaticamente|Analisado|Classificação sugerida|Não foi possível|Revise os dados/
   );
   const actions = auditActions(ownerA.user.tenant_id, result.data.analysis.id);
   assert.ok(actions.includes('AI_CLASSIFICATION_FAILED'));

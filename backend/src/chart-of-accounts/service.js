@@ -98,16 +98,20 @@ function importFromPreview(deps, req, preview, name, sourceFile, sourceType) {
     );
   })();
   if (audit) {
-    audit(req, 'ACCOUNT_PLAN_IMPORTED', 'ACCOUNT_PLAN', plan, null, {
+    const payload = {
       file: sourceFile,
       tenant_id: req.user.tenant_id,
-      company_id: req.companyScope || null,
+      company_id: req.companyScope || (req.body && req.body.company_id) || null,
+      user_id: req.user.sub,
+      accounts: imported,
       found: preview.total,
       imported,
       rejected: preview.rejected,
       ignored,
       result: 'COMPLETED'
-    });
+    };
+    audit(req, 'ACCOUNT_PLAN_IMPORTED', 'ACCOUNT_PLAN', plan, null, payload);
+    audit(req, 'ACCOUNTING_PLAN_IMPORTED', 'ACCOUNT_PLAN', plan, null, payload);
   }
   return {
     planId: plan,

@@ -59,7 +59,8 @@ function mountAccountingPeriodRoutes(app, deps) {
       const items = result.items.map(p => ({
         ...p,
         status_label: labelOf(p.status),
-        competence_label: service.formatCompetenceBr(p.competence)
+        competence_label: service.formatCompetenceBr(p.competence),
+        can_delete: service.canDelete(p)
       }));
       res.json(paged(items, result.total, page, page_size));
     } catch (err) {
@@ -88,7 +89,8 @@ function mountAccountingPeriodRoutes(app, deps) {
       res.status(isNew ? 201 : 200).json({
         ...payload,
         status_label: labelOf(created.status),
-        competence_label: service.formatCompetenceBr(created.competence)
+        competence_label: service.formatCompetenceBr(created.competence),
+        can_delete: service.canDelete(created)
       });
     } catch (err) {
       handle(err, res);
@@ -102,7 +104,8 @@ function mountAccountingPeriodRoutes(app, deps) {
       res.json({
         ...period,
         status_label: labelOf(period.status),
-        competence_label: service.formatCompetenceBr(period.competence)
+        competence_label: service.formatCompetenceBr(period.competence),
+        can_delete: service.canDelete(period)
       });
     } catch (err) {
       handle(err, res);
@@ -176,6 +179,21 @@ function mountAccountingPeriodRoutes(app, deps) {
         status_label: labelOf(after.status),
         competence_label: service.formatCompetenceBr(after.competence)
       });
+    } catch (err) {
+      handle(err, res);
+    }
+  });
+
+
+  app.delete('/api/contabilidade/competencias/:id', auth, closer, scope, (req, res) => {
+    try {
+      const period = loadVisible(req, res, req.params.id);
+      if (!period) return;
+      const reason = req.body && (req.body.reason || req.body.motivo);
+      const after = service.remove(req.user.tenant_id, period.id, {
+        userId: req.user.sub, reason, req
+      });
+      res.json(after);
     } catch (err) {
       handle(err, res);
     }

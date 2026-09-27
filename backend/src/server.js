@@ -43,6 +43,7 @@ const {mountPushRoutes}=require('./push/routes');
 const {sendOfficeDashboard}=require('./dashboard/office');
 const chartParser=require('./chart-of-accounts/parser');
 const chartService=require('./chart-of-accounts/service');
+const chartAdmin=require('./chart-of-accounts/admin');
 let aiCredentialTestHook=testOpenAiConnection;
 function setAiCredentialTestConnection(fn){aiCredentialTestHook=typeof fn==='function'?fn:testOpenAiConnection;return aiCredentialTestHook}
 const {openDatabase}=require('./database');
@@ -1155,9 +1156,85 @@ const planUpload=multer({dest:path.join(UPLOAD,'planos-contas'),limits:{fileSize
 app.get('/api/plano-contas',auth,role('OWNER','ACCOUNTANT','STAFF'),(req,res)=>res.json(qRows('SELECT p.*,COUNT(a.id) account_count FROM account_plans p LEFT JOIN accounts a ON a.plan_id=p.id WHERE p.tenant_id=? GROUP BY p.id ORDER BY p.created_at DESC',req.user.tenant_id)));
 app.get('/api/plano-contas/analiticas',auth,role('OWNER','ACCOUNTANT','STAFF'),(req,res)=>{const q=String(req.query.q||req.query.search||'').trim();const p=[req.user.tenant_id];let where="tenant_id=? AND account_type='A' AND is_postable=1 AND IFNULL(active,1)=1";if(q){where+=' AND (account_code LIKE ? OR classification_code LIKE ? OR description LIKE ?)';p.push('%'+q+'%','%'+q+'%','%'+q+'%')}const total=one(`SELECT COUNT(*) n FROM accounts WHERE ${where}`,...p).n;const {page,page_size,offset}=pageParams(req,25);const items=qRows(`SELECT id,account_code,classification_code,description,account_type,is_postable,active FROM accounts WHERE ${where} ORDER BY classification_code,account_code LIMIT ? OFFSET ?`,...p,page_size,offset);res.json(paged(items,total,page,page_size))});
 app.get('/api/plano-contas/:id/accounts',auth,role('OWNER','ACCOUNTANT','STAFF'),(req,res)=>{const p=[req.user.tenant_id,req.params.id],s=String(req.query.search||'').trim();let sql='SELECT * FROM accounts WHERE tenant_id=? AND plan_id=?';if(s){sql+=' AND (description LIKE ? OR account_code LIKE ? OR classification_code LIKE ?)';p.push(`%${s}%`,`%${s}%`,`%${s}%`)}sql+=' ORDER BY classification_code,account_code LIMIT 10000';res.json(qRows(sql,...p))});
+app.get('/api/plano-contas/:id/dependencias',auth,role('OWNER','ACCOUNTANT'),(req,res)=>{
+  const plan=chartAdmin.getPlanForTenant(db,req.user.tenant_id,req.params.id);
+  if(!plan)return deny(res,404,'Plano de contas não encontrado.','NOT_FOUND');
+  res.json(chartAdmin.collectPlanDependencies(db,req.user.tenant_id,plan.id));
+});
+app.patch('/api/plano-contas/accounts/:accountId',auth,role('OWNER','ACCOUNTANT'),(req,res)=>{
+  try{
+    const body=req.body||{};
+    let wantActive=null;
+    if(body.active!==undefined)wantActive=!(body.active===0||body.active===false||body.active==='0');
+    else if(body.status!=null){const st=String(body.status).toUpperCase();wantActive=!(st==='INATIVA'||st==='INACTIVE'||st==='0')}
+    else return deny(res,400,'Informe active ou status.','INVALID_FIELDS');
+    const before=one('SELECT * FROM accounts WHERE tenant_id=? AND id=?',req.user.tenant_id,req.params.accountId);
+    if(!before)return deny(res,404,'Conta não encontrada.','NOT_FOUND');
+    const after=chartAdmin.setAccountActive(db,{tenantId:req.user.tenant_id,accountId:req.params.accountId,active:wantActive});
+    const companyId=req.companyScope||body.company_id||null;
+    if(companyId&&!companyOk(req,companyId))return deny(res,403,'Você não tem permissão para realizar esta operação.','COMPANY_FORBIDDEN');
+    audit(req,wantActive?'ACCOUNT_REACTIVATED':'ACCOUNT_DEACTIVATED','ACCOUNT',after.id,
+      {active:before.active,account_code:before.account_code,classification_code:before.classification_code,description:before.description},
+      {active:after.active,status:after.active?'ATIVA':'INATIVA',tenant_id:req.user.tenant_id,company_id:companyId,user_id:req.user.sub,account_code:after.account_code,result:'OK'});
+    res.json({...after,status:after.active?'ATIVA':'INATIVA'});
+  }catch(e){return deny(res,e.http||400,e.message,e.code||'ACCOUNT_UPDATE_FAILED')}
+});
+app.delete('/api/plano-contas/:id',auth,role('OWNER','ACCOUNTANT'),(req,res)=>{
+  const plan=chartAdmin.getPlanForTenant(db,req.user.tenant_id,req.params.id);
+  if(!plan)return deny(res,404,'Plano de contas não encontrado.','NOT_FOUND');
+  const companyId=req.companyScope||(req.body&&req.body.company_id)||null;
+  if(companyId&&!companyOk(req,companyId))return deny(res,403,'Você não tem permissão para realizar esta operação.','COMPANY_FORBIDDEN');
+  const accountQty=chartAdmin.accountCount(db,req.user.tenant_id,plan.id);
+  audit(req,'ACCOUNTING_PLAN_DELETE_REQUESTED','ACCOUNT_PLAN',plan.id,null,{tenant_id:req.user.tenant_id,company_id:companyId,user_id:req.user.sub,accounts:accountQty,result:'REQUESTED'});
+  const check=chartAdmin.collectPlanDependencies(db,req.user.tenant_id,plan.id);
+  if(check.blocked){
+    audit(req,'ACCOUNTING_PLAN_DELETE_BLOCKED','ACCOUNT_PLAN',plan.id,null,{tenant_id:req.user.tenant_id,company_id:companyId,user_id:req.user.sub,accounts:accountQty,result:'BLOCKED',reason:chartAdmin.BLOCKED_MESSAGE,blocking:check.blocking});
+    return res.status(409).json({error:'PLAN_DELETE_BLOCKED',message:chartAdmin.BLOCKED_MESSAGE,check});
+  }
+  try{
+    const deleted=chartAdmin.deletePlanSafe(db,{tenantId:req.user.tenant_id,planId:plan.id});
+    audit(req,'ACCOUNTING_PLAN_DELETED','ACCOUNT_PLAN',plan.id,{name:plan.name,status:plan.status},{tenant_id:req.user.tenant_id,company_id:companyId,user_id:req.user.sub,accounts:deleted.deleted_accounts,result:'DELETED'});
+    res.json(deleted);
+  }catch(e){
+    if(e.code==='PLAN_DELETE_BLOCKED'){
+      audit(req,'ACCOUNTING_PLAN_DELETE_BLOCKED','ACCOUNT_PLAN',plan.id,null,{tenant_id:req.user.tenant_id,company_id:companyId,user_id:req.user.sub,accounts:accountQty,result:'BLOCKED',reason:e.message,blocking:(e.check&&e.check.blocking)||[]});
+      return res.status(409).json({error:'PLAN_DELETE_BLOCKED',message:e.message,check:e.check});
+    }
+    return deny(res,e.http||500,e.message,e.code||'PLAN_DELETE_FAILED');
+  }
+});
 app.post('/api/plano-contas/preview',auth,role('OWNER','ACCOUNTANT','STAFF'),planUpload.single('file'),async(req,res)=>{try{if(!req.file)return res.status(400).json({error:'FILE_REQUIRED',message:'Envie um arquivo.'});if(req.body&&req.body.company_id&&!companyOk(req,req.body.company_id))return deny(res,403,'Você não tem permissão para realizar esta operação.','COMPANY_FORBIDDEN');const preview=await chartService.previewPlanFile(req.file);res.json(preview)}catch(e){const fileType=req.file&&path.extname(req.file.originalname||'').replace('.','').toLowerCase();if(e.http&&e.http<500)return res.status(e.http).json(chartService.previewErrorPayload(e,fileType));console.error('plan_accounts_preview',{stage:e.stage||'preview',code:e.code,message:e.message,stack:e.stack});res.status(500).json({error:'PLAN_ACCOUNTS_PREVIEW_INVALID',message:'Não foi possível processar o arquivo.',details:{stage:'preview',code:e.code||'INTERNAL_ERROR',reason:'Erro técnico interno.',fileType:fileType||null}})}finally{if(req.file)try{fs.unlinkSync(req.file.path)}catch{}}});
 async function importPlan(req,file,name){return chartService.importPlanFile({id,exec,db,audit},req,file,name)}
-app.post('/api/plano-contas/import',auth,role('OWNER','ACCOUNTANT','STAFF'),planUpload.single('file'),async(req,res)=>{try{if(!req.file)return res.status(400).json({error:'FILE_REQUIRED',message:'Envie um arquivo.'});if(req.body&&req.body.company_id&&!companyOk(req,req.body.company_id))return deny(res,403,'Você não tem permissão para realizar esta operação.','COMPANY_FORBIDDEN');res.status(201).json(await importPlan(req,req.file,req.body.name||req.file.originalname))}catch(e){const fileType=req.file&&path.extname(req.file.originalname||'').replace('.','').toLowerCase();if(e.http&&e.http<500)return res.status(e.http).json({...chartService.previewErrorPayload(e,fileType),error:e.error||'IMPORT_FAILED'});console.error('plan_accounts_import',{stage:e.stage||'import',code:e.code,message:e.message,stack:e.stack});res.status(500).json({error:'IMPORT_FAILED',message:'Não foi possível processar o arquivo.',details:{stage:'import',code:e.code||'INTERNAL_ERROR',reason:'Erro técnico interno.',fileType:fileType||null}})}finally{if(req.file)try{fs.unlinkSync(req.file.path)}catch{}}});
+app.post('/api/plano-contas/import',auth,role('OWNER','ACCOUNTANT','STAFF'),planUpload.single('file'),async(req,res)=>{try{
+  if(!req.file)return res.status(400).json({error:'FILE_REQUIRED',message:'Envie um arquivo.'});
+  if(req.body&&req.body.company_id&&!companyOk(req,req.body.company_id))return deny(res,403,'Você não tem permissão para realizar esta operação.','COMPANY_FORBIDDEN');
+  const companyId=req.companyScope||(req.body&&req.body.company_id)||null;
+  const existing=chartAdmin.getTenantActivePlan(db,req.user.tenant_id);
+  const confirm=req.body&&(req.body.confirm_replace===true||req.body.confirm_replace==='1'||req.body.confirm_replace==='true'||req.body.replace_existing===true||req.body.replace_existing==='1');
+  if(existing){
+    const check=chartAdmin.collectPlanDependencies(db,req.user.tenant_id,existing.id);
+    if(!confirm){
+      return res.status(409).json({
+        error:'PLAN_EXISTS',
+        message:chartAdmin.PLAN_EXISTS_MESSAGE,
+        plan_id:existing.id,
+        accounts:existing.account_count,
+        can_replace:!check.blocked,
+        check,
+        actions:check.blocked?['Cancelar']:['Cancelar','Excluir plano atual e importar novo']
+      });
+    }
+    if(!['OWNER','ACCOUNTANT'].includes(req.user.role))return deny(res,403,'Somente administradores do escritório podem substituir o plano de contas.','FORBIDDEN');
+    audit(req,'ACCOUNTING_PLAN_DELETE_REQUESTED','ACCOUNT_PLAN',existing.id,null,{tenant_id:req.user.tenant_id,company_id:companyId,user_id:req.user.sub,accounts:existing.account_count,result:'REQUESTED',via:'import_replace'});
+    if(check.blocked){
+      audit(req,'ACCOUNTING_PLAN_DELETE_BLOCKED','ACCOUNT_PLAN',existing.id,null,{tenant_id:req.user.tenant_id,company_id:companyId,user_id:req.user.sub,accounts:existing.account_count,result:'BLOCKED',reason:chartAdmin.BLOCKED_MESSAGE,blocking:check.blocking});
+      return res.status(409).json({error:'PLAN_DELETE_BLOCKED',message:chartAdmin.BLOCKED_MESSAGE,check});
+    }
+    const deleted=chartAdmin.deletePlanSafe(db,{tenantId:req.user.tenant_id,planId:existing.id});
+    audit(req,'ACCOUNTING_PLAN_DELETED','ACCOUNT_PLAN',existing.id,{name:existing.name},{tenant_id:req.user.tenant_id,company_id:companyId,user_id:req.user.sub,accounts:deleted.deleted_accounts,result:'DELETED',via:'import_replace'});
+  }
+  res.status(201).json(await importPlan(req,req.file,req.body.name||req.file.originalname));
+}catch(e){const fileType=req.file&&path.extname(req.file.originalname||'').replace('.','').toLowerCase();if(e.http&&e.http<500)return res.status(e.http).json({...chartService.previewErrorPayload(e,fileType),error:e.error||e.code||'IMPORT_FAILED',message:e.message});console.error('plan_accounts_import',{stage:e.stage||'import',code:e.code,message:e.message,stack:e.stack});res.status(500).json({error:'IMPORT_FAILED',message:'Não foi possível processar o arquivo.',details:{stage:'import',code:e.code||'INTERNAL_ERROR',reason:'Erro técnico interno.',fileType:fileType||null}})}finally{if(req.file)try{fs.unlinkSync(req.file.path)}catch{}}});
 app.post('/api/plano-contas/accounts',auth,role('OWNER','ACCOUNTANT'),(req,res)=>{const x=id();const a=req.body;exec('INSERT INTO accounts(id,tenant_id,plan_id,source_id,account_code,classification_code,account_type,description,parent_code,level,is_postable) VALUES(?,?,?,?,?,?,?,?,?,?,?)',x,req.user.tenant_id,a.plan_id,a.source_id||null,a.account_code,a.classification_code||a.account_code,a.account_type||'A',a.description,a.parent_code||null,a.level||0,a.is_postable===undefined?(a.account_type||'A')==='A':a.is_postable?1:0);res.status(201).json(one('SELECT * FROM accounts WHERE id=?',x))});
 // CATEGORIES/BANKS/RULES
 function configCompanyId(req){if(req.companyScope)return req.companyScope;const cid=req.body&&req.body.company_id||null;if(cid&&!companyOk(req,cid)){const e=new Error('Você não tem permissão para realizar esta operação.');e.code='COMPANY_FORBIDDEN';e.http=403;throw e}return cid||null}
@@ -1238,6 +1315,39 @@ app.get('/api/lancamentos',auth,scope,(req,res)=>{const sc=scopedCompanyWhere(re
 app.get('/api/lancamentos/:id',auth,scope,(req,res)=>{const e=entry(req,req.params.id);if(!e||!companyOk(req,e.company_id))return res.status(404).json({error:'NOT_FOUND'});res.json(e)});
 app.post('/api/lancamentos',auth,role('OWNER','ACCOUNTANT','STAFF'),scope,(req,res)=>{if(req.companyScope)req.body.company_id=req.companyScope;if(!companyOk(req,req.body.company_id))return res.status(403).json({error:'COMPANY_FORBIDDEN'});if(!req.body.company_id||!today(req.body.occurred_on)||!req.body.description)return res.status(400).json({error:'INVALID_ENTRY'});const writable=one('SELECT status FROM companies WHERE tenant_id=? AND id=?',req.user.tenant_id,req.body.company_id);if(!writable)return deny(res,404,'Empresa não encontrada.','COMPANY_NOT_FOUND');if(writable.status!=='ACTIVE')return deny(res,409,'Esta empresa está bloqueada ou indisponível.','COMPANY_UNAVAILABLE');if(!guardPeriodWritable(req,res,req.body.company_id,req.body.occurred_on))return;let lines;try{lines=normalizeEntryLines(req.body.lines);assertBalancedLines(lines);validateAccountingSemantics({sourceType:req.body.source_type||'MANUAL',entryKind:req.body.entry_kind,lines})}catch(e){return deny(res,e.http||422,e.message,e.code||'INVALID_ENTRY')}if(req.body.source_id){const existing=one('SELECT id FROM entries WHERE tenant_id=? AND source_type=? AND source_id=?',req.user.tenant_id,req.body.source_type||'MANUAL',req.body.source_id);if(existing)return deny(res,409,'Já existe lançamento para esta movimentação.','ENTRY_EXISTS')}const eid=id();try{db.transaction(()=>{exec('INSERT INTO entries(id,tenant_id,company_id,source_type,source_id,occurred_on,description,status,confidence,generated_by) VALUES(?,?,?,?,?,?,?,?,?,?)',eid,req.user.tenant_id,req.body.company_id,req.body.source_type||'MANUAL',req.body.source_id||null,req.body.occurred_on,req.body.description,'PENDING',1,req.user.sub);for(const l of lines){assertPostableAccount(req.user.tenant_id,l.account_id);exec('INSERT INTO entry_lines(id,entry_id,account_id,side,amount_cents,memo) VALUES(?,?,?,?,?,?)',id(),eid,l.account_id,l.side,l.amount_cents,l.memo||null)}})()}catch(e){return deny(res,e.http||422,e.message||'Falha ao gravar lançamento.',e.code||'ENTRY_WRITE_FAILED')}saveClassificationRun(req,{companyId:req.body.company_id,sourceType:req.body.source_type||'MANUAL',sourceId:req.body.source_id||null,entryId:eid,cls:{status:'CLASSIFIED',origin:'MANUAL',score:100,reasons:['Lançamento manual do escritório'],debit_account_id:lines.find(x=>x.side==='D')?.account_id,credit_account_id:lines.find(x=>x.side==='C')?.account_id,candidates:[]},note:req.body.note||null});audit(req,'CREATE','ENTRY',eid,null,{description:req.body.description,lines:lines.length});emitFromReq(req,EVENT_TYPES.ENTRY_CREATED,{companyId:req.body.company_id,entityType:'entry',entityId:eid,payload:{description:req.body.description}});res.status(201).json(entry(req,eid))});
 app.post('/api/lancamentos/:id/reclassificar',auth,role('OWNER','ACCOUNTANT','STAFF'),scope,(req,res)=>{const e=entry(req,req.params.id);if(!e||!companyOk(req,e.company_id))return res.status(404).json({error:'NOT_FOUND'});if(!entryStates.canReclassify(e.status))return deny(res,409,'Lançamento efetivado não pode ser alterado.','ENTRY_POSTED');if(!guardPeriodWritable(req,res,e.company_id,e.occurred_on))return;let lines;try{lines=normalizeEntryLines(req.body.lines);assertBalancedLines(lines);validateAccountingSemantics({sourceType:e.source_type,entryKind:req.body.entry_kind||null,lines})}catch(err){return deny(res,err.http||422,err.message,err.code||'ENTRY_NOT_BALANCED')}try{db.transaction(()=>{exec('DELETE FROM entry_lines WHERE entry_id=?',e.id);for(const l of lines){assertPostableAccount(req.user.tenant_id,l.account_id);exec('INSERT INTO entry_lines(id,entry_id,account_id,side,amount_cents,memo) VALUES(?,?,?,?,?,?)',id(),e.id,l.account_id,l.side,l.amount_cents,l.memo||null)}exec("UPDATE entries SET status='PENDING',confidence=1,rejected_reason=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",e.id);exec('INSERT INTO entry_reclassifications(id,tenant_id,entry_id,account_id,side,amount_cents,reason,user_id) VALUES(?,?,?,?,?,?,?,?)',id(),req.user.tenant_id,e.id,lines[0].account_id,lines[0].side,lines[0].amount_cents,req.body.reason||req.body.note||'Reclassificação manual',req.user.sub);exec("UPDATE pendencies SET status='RESOLVED',resolved_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND entity_type='ENTRY' AND entity_id=? AND status='OPEN'",req.user.tenant_id,e.id)})()}catch(err){return deny(res,err.http||422,err.message||'Falha ao reclassificar.',err.code||'ENTRY_WRITE_FAILED')}const cls={status:'CLASSIFIED',origin:'MANUAL',score:100,reasons:['Decisão manual do contador'],debit_account_id:lines.find(x=>x.side==='D')?.account_id,credit_account_id:lines.find(x=>x.side==='C')?.account_id,candidates:(e.classification&&e.classification.candidates)||[]};saveClassificationRun(req,{companyId:e.company_id,sourceType:e.source_type,sourceId:e.source_id,entryId:e.id,cls,note:req.body.reason||req.body.note||null});audit(req,'RECLASSIFY','ENTRY',e.id,{status:e.status,lines:(e.lines||[]).length},{status:'PENDING',lines:lines.length,note:req.body.reason||req.body.note||null});audit(req,'CLASSIFICATION_COMPLETED','ENTRY',e.id,{status:e.status},{status:'PENDING',user_id:req.user.sub,company_id:e.company_id,reason:req.body.reason||req.body.note||null,confidence:1,accounts:lines.map(l=>({side:l.side,account_id:l.account_id,amount_cents:l.amount_cents}))});emitFromReq(req,EVENT_TYPES.CLASSIFICATION_COMPLETED,{companyId:e.company_id,entityType:'entry',entityId:e.id,payload:{description:e.description,note:req.body.reason||req.body.note||null}});res.json(entry(req,e.id))});
+app.delete('/api/lancamentos/:id',auth,role('OWNER','ACCOUNTANT','STAFF'),scope,(req,res)=>{
+const e=entry(req,req.params.id);
+if(!e||!companyOk(req,e.company_id))return deny(res,404,'Movimentação não encontrada.','NOT_FOUND');
+if(!entryStates.canDeleteUnclassified(e.status))return deny(res,409,'Só é possível excluir movimentações que ainda não foram classificadas.','ENTRY_ALREADY_CLASSIFIED');
+if(!guardPeriodWritable(req,res,e.company_id,e.occurred_on))return;
+const reason=String(req.body&&(req.body.reason||req.body.motivo)||'').trim();
+try{db.transaction(()=>{
+exec('DELETE FROM entry_reclassifications WHERE tenant_id=? AND entry_id=?',req.user.tenant_id,e.id);
+exec('DELETE FROM approvals WHERE tenant_id=? AND entry_id=?',req.user.tenant_id,e.id);
+exec('DELETE FROM classification_runs WHERE tenant_id=? AND entry_id=?',req.user.tenant_id,e.id);
+exec('DELETE FROM export_items WHERE entry_id=?',e.id);
+exec('DELETE FROM entry_lines WHERE entry_id=?',e.id);
+exec("DELETE FROM pendencies WHERE tenant_id=? AND entity_type='ENTRY' AND entity_id=?",req.user.tenant_id,e.id);
+exec('UPDATE document_pipeline_runs SET entry_id=NULL WHERE tenant_id=? AND entry_id=?',req.user.tenant_id,e.id);
+exec('UPDATE document_learning_decisions SET entry_id=NULL WHERE tenant_id=? AND entry_id=?',req.user.tenant_id,e.id);
+exec('DELETE FROM entries WHERE tenant_id=? AND id=?',req.user.tenant_id,e.id);
+if(e.source_id&&(e.source_type==='EXPENSE'||e.source_type==='REVENUE')){
+const table=e.source_type==='EXPENSE'?'expenses':'revenues';
+if(e.source_type==='EXPENSE'){
+exec('UPDATE expense_document_analyses SET expense_id=NULL WHERE tenant_id=? AND expense_id=?',req.user.tenant_id,e.source_id);
+exec('UPDATE document_pipeline_runs SET expense_id=NULL WHERE tenant_id=? AND expense_id=?',req.user.tenant_id,e.source_id);
+}
+exec('DELETE FROM rule_runs WHERE tenant_id=? AND source_type=? AND source_id=?',req.user.tenant_id,e.source_type,e.source_id);
+exec('DELETE FROM '+table+' WHERE tenant_id=? AND id=?',req.user.tenant_id,e.source_id);
+exec("UPDATE pendencies SET status='RESOLVED',resolved_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND entity_id=? AND status='OPEN'",req.user.tenant_id,e.source_id);
+}
+})()}catch(err){
+console.error('entry_delete_failed',err&&err.message,err&&err.code);
+return deny(res,err.http||500,err.message||'Não foi possível excluir a movimentação.','ENTRY_DELETE_FAILED');
+}
+audit(req,'ENTRY_DELETED','ENTRY',e.id,{status:e.status,source_type:e.source_type,source_id:e.source_id,description:e.description,company_id:e.company_id},{deleted:true,reason:reason||null,user_id:req.user.sub,company_id:e.company_id});
+res.json({ok:true,id:e.id,deleted:true});
+});
 // APPROVAL
 // APPROVAL
 app.get('/api/aprovacao/pendentes',auth,requireOffice,scope,(req,res)=>{const sc=scopedCompanyWhere(req,'e');let{where,p}=sc;where+=" AND e.status='PENDING'";const q=String(req.query.q||req.query.search||'').trim();if(q){where+=' AND e.description LIKE ?';p.push(`%${q}%`)}if(today(req.query.from)){where+=' AND date(e.occurred_on)>=date(?)';p.push(req.query.from)}if(today(req.query.to)){where+=' AND date(e.occurred_on)<=date(?)';p.push(req.query.to)}const total=one(`SELECT COUNT(*) n FROM entries e WHERE ${where}`,...p).n;const {page,page_size,offset}=pageParams(req,25);const items=qRows(`SELECT e.*,c.name company_name,COALESCE((SELECT SUM(amount_cents) FROM entry_lines WHERE entry_id=e.id AND side='D'),0) debit,COALESCE((SELECT SUM(amount_cents) FROM entry_lines WHERE entry_id=e.id AND side='C'),0) credit,(SELECT group_concat(a.account_code||' — '||a.description,' | ') FROM entry_lines l JOIN accounts a ON a.id=l.account_id WHERE l.entry_id=e.id AND l.side='D') debit_accounts,(SELECT group_concat(a.account_code||' — '||a.description,' | ') FROM entry_lines l JOIN accounts a ON a.id=l.account_id WHERE l.entry_id=e.id AND l.side='C') credit_accounts,(SELECT d.original_name FROM documents d JOIN expenses x ON x.document_id=d.id WHERE x.id=e.source_id UNION ALL SELECT d.original_name FROM documents d JOIN revenues r ON r.document_id=d.id WHERE r.id=e.source_id) document_name,COALESCE((SELECT origin FROM expenses WHERE id=e.source_id),(SELECT origin FROM revenues WHERE id=e.source_id),e.source_type) movement_origin FROM entries e JOIN companies c ON c.id=e.company_id WHERE ${where} ORDER BY e.occurred_on,e.created_at LIMIT ? OFFSET ?`,...p,page_size,offset).map(e=>({...e,origin:e.movement_origin,origin_label:origens.isValid(e.movement_origin)?origens.label(e.movement_origin):(e.source_type==='MANUAL'?'Lançamento manual':String(e.movement_origin||'-')),entry:{balanced:e.debit===e.credit&&e.debit>0}}));res.json(paged(items,total,page,page_size))});
@@ -1643,4 +1753,4 @@ if(require.main===module){
   if(HOST)app.listen(PORT,HOST,startErr);
   else app.listen(PORT,startErr);
 }
-module.exports={app,db,config,documentStorage,documentAccess,documentIntelligence,accountingAIService,smartExpenseService,aiControlService,aiCredentialService,setAccountingAIProvider,refreshAccountingAIProvider,setAiCredentialTestConnection,sessions,emitEvent,EVENT_TYPES,setCnpjProvider,setCepProvider,setEmailProvider,setSmtpHooks,cnpjNorm,setWhatsAppProvider,processCommunicationJobs:(n,w)=>comms.processDueJobs(n,w),communicationEngine:comms,communicationService,origens,documentOwnership,markClientFrontPort,entryStates,postingService,validateAccountingSemantics,processService,exportService,accountingPeriodService,documentPipelineService,pushService,notificationService,chartParser,chartService};
+module.exports={app,db,config,documentStorage,documentAccess,documentIntelligence,accountingAIService,smartExpenseService,aiControlService,aiCredentialService,setAccountingAIProvider,refreshAccountingAIProvider,setAiCredentialTestConnection,sessions,emitEvent,EVENT_TYPES,setCnpjProvider,setCepProvider,setEmailProvider,setSmtpHooks,cnpjNorm,setWhatsAppProvider,processCommunicationJobs:(n,w)=>comms.processDueJobs(n,w),communicationEngine:comms,communicationService,origens,documentOwnership,markClientFrontPort,entryStates,postingService,validateAccountingSemantics,processService,exportService,accountingPeriodService,documentPipelineService,pushService,notificationService,chartParser,chartService,chartAdmin};

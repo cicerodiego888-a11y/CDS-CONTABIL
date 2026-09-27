@@ -99,6 +99,8 @@ function createDocumentExtractionService({
       document_id: row.document_id,
       company_id: row.company_id,
       document_name: row.original_name || null,
+      mime_type: row.mime_type || null,
+      size_bytes: row.size_bytes != null ? Number(row.size_bytes) : null,
       company_name: row.company_trade_name || row.company_name || null,
       status: row.status,
       extraction_method: row.extraction_method || null,
@@ -117,7 +119,7 @@ function createDocumentExtractionService({
 
   function get(tenantId, documentId) {
     return publicExtraction(one(
-      `SELECT e.*,d.original_name,c.name company_name,c.trade_name company_trade_name
+      `SELECT e.*,d.original_name,d.mime_type,d.size_bytes,c.name company_name,c.trade_name company_trade_name
        FROM document_extractions e
        JOIN documents d ON d.id=e.document_id
        JOIN companies c ON c.id=e.company_id

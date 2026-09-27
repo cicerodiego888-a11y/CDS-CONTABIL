@@ -16,7 +16,41 @@ function fail(message, code, http, extra) {
 }
 
 function centsFromAmount(value) {
-  const n = typeof value === 'number' ? value : Number(String(value).replace(/\./g, '').replace(',', '.'));
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return Math.round(value * 100);
+  }
+  const raw = String(value).trim().replace(/[^\d.,-]/g, '');
+  if (!raw || raw === '-' || raw === '.' || raw === ',') return null;
+  let n;
+  if (raw.includes(',') && raw.includes('.')) {
+    // BR 2.158,81 vs US 2,158.81 — o separador decimal é o que aparece por último
+    if (raw.lastIndexOf(',') > raw.lastIndexOf('.')) {
+      n = Number(raw.replace(/\./g, '').replace(',', '.'));
+    } else {
+      n = Number(raw.replace(/,/g, ''));
+    }
+  } else if (raw.includes(',')) {
+    const parts = raw.split(',');
+    if (parts.length === 2 && parts[1].length <= 2) {
+      n = Number(parts[0].replace(/\./g, '') + '.' + parts[1]);
+    } else {
+      n = Number(raw.replace(/,/g, ''));
+    }
+  } else if (raw.includes('.')) {
+    const parts = raw.split('.');
+    const last = parts[parts.length - 1];
+    if (parts.length === 2 && last.length <= 2) {
+      n = Number(raw);
+    } else if (last.length <= 2 && parts.length > 2) {
+      n = Number(parts.slice(0, -1).join('') + '.' + last);
+    } else {
+      n = Number(parts.join(''));
+    }
+  } else {
+    n = Number(raw);
+  }
   if (!Number.isFinite(n) || n <= 0) return null;
   return Math.round(n * 100);
 }
@@ -440,6 +474,60 @@ function createDocumentAccountingPipeline({
         tenantId, existingExpense.id
       );
       if (existingEntry) {
+        // Nova Despesa / createTx pode ter deixado NEEDS_CLASSIFICATION sem linhas.
+        // Se o pipeline resolveu D/C, promove para PENDING (só aprovação do contador).
+        if (existingEntry.status === 'NEEDS_CLASSIFICATION' &&
+            suggestion.debit_account_id && suggestion.credit_account_id &&
+            suggestion.amount_cents > 0) {
+          const lineCount = one(
+            `SELECT COUNT(*) n FROM entry_lines WHERE entry_id=?`,
+            existingEntry.id
+          );
+          if (!lineCount || !lineCount.n) {
+            db.transaction(() => {
+              run(
+                `INSERT INTO entry_lines(id,entry_id,account_id,side,amount_cents,memo) VALUES(?,?,?,?,?,?)`,
+                id(), existingEntry.id, suggestion.debit_account_id, 'D',
+                suggestion.amount_cents, suggestion.history
+              );
+              run(
+                `INSERT INTO entry_lines(id,entry_id,account_id,side,amount_cents,memo) VALUES(?,?,?,?,?,?)`,
+                id(), existingEntry.id, suggestion.credit_account_id, 'C',
+                suggestion.amount_cents, suggestion.history
+              );
+              run(
+                `UPDATE entries SET status='PENDING',confidence=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+                suggestion.classification_confidence || 0.9, existingEntry.id
+              );
+              run(
+                `UPDATE expenses SET bank_id=COALESCE(?,bank_id),category_id=COALESCE(?,category_id),
+                 status='PENDING',updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+                suggestion.bank_id || null, suggestion.category_id || null, existingExpense.id
+              );
+              run(
+                `INSERT INTO classification_runs(
+                   id,tenant_id,company_id,source_type,source_id,entry_id,status,
+                   chosen_debit_account_id,chosen_credit_account_id,origin,score,
+                   reasons_json,candidates_json,decided_by,note
+                 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                id(), tenantId, companyId, 'EXPENSE', existingExpense.id, existingEntry.id,
+                'CLASSIFIED', suggestion.debit_account_id, suggestion.credit_account_id,
+                nature.source || 'PIPELINE',
+                Math.round((suggestion.classification_confidence || 0.9) * 100),
+                JSON.stringify([nature.reason || 'Pipeline Audácia — promoção de classificação']),
+                JSON.stringify(nature.candidates || []),
+                actorId, 'Pipeline automático Audácia'
+              );
+            })();
+            return {
+              expense_id: existingExpense.id,
+              entry_id: existingEntry.id,
+              reused: true,
+              promoted: true,
+              source_type: 'EXPENSE'
+            };
+          }
+        }
         return { expense_id: existingExpense.id, entry_id: existingEntry.id, reused: true };
       }
     }
@@ -589,16 +677,12 @@ function createDocumentAccountingPipeline({
       if ((!ruleHit || !ruleHit.rule) && autonomy.allows('CLASSIFY_OPERATION')) {
         if (accountingAIService && typeof accountingAIService.requestClassification === 'function') {
           try {
-            const sug = await accountingAIService.requestClassification(tenantId, documentId, actorId, {
+            const raw = await accountingAIService.requestClassification(tenantId, documentId, actorId, {
               force: false, allowUnreviewed: true
             });
-            if (sug && (sug.operation_type || sug.suggested_operation_type)) {
-              aiSuggestion = {
-                operation_type: sug.operation_type || sug.suggested_operation_type,
-                confidence: sug.confidence,
-                reason: sug.reason || sug.explanation,
-                candidates: sug.candidates || []
-              };
+            const sug = raw && (raw.suggestion || raw);
+            if (sug && (sug.operation_type || sug.suggested_operation_type || sug.primary_account)) {
+              aiSuggestion = sug;
             }
           } catch {
             // IA indisponível — continua com heurística/regras
@@ -617,6 +701,32 @@ function createDocumentAccountingPipeline({
       const sourceKind = kindOf(nature.operation_type);
       let category = matchCategory(tenantId, document.company_id, description, supplier, sourceKind);
       let bank = defaultBank(tenantId, document.company_id);
+
+      // Completa banco/categoria com a sugestão da IA quando o match heurístico falhar
+      if (aiSuggestion) {
+        if (!bank && aiSuggestion.bank && aiSuggestion.bank.id) {
+          bank = one(
+            `SELECT id,account_id,name FROM banks WHERE id=? AND active=1`,
+            aiSuggestion.bank.id
+          ) || bank;
+        } else if (!bank && aiSuggestion.suggested_bank_id) {
+          bank = one(
+            `SELECT id,account_id,name FROM banks WHERE id=? AND active=1`,
+            aiSuggestion.suggested_bank_id
+          ) || bank;
+        }
+        if (!category && aiSuggestion.category && aiSuggestion.category.id) {
+          category = one(
+            `SELECT id,name,account_id FROM categories WHERE id=? AND active=1`,
+            aiSuggestion.category.id
+          ) || category;
+        } else if (!category && aiSuggestion.suggested_category_id) {
+          category = one(
+            `SELECT id,name,account_id FROM categories WHERE id=? AND active=1`,
+            aiSuggestion.suggested_category_id
+          ) || category;
+        }
+      }
 
       const txLike = {
         description: description || supplier || 'Documento',
@@ -863,4 +973,4 @@ function createDocumentAccountingPipeline({
   };
 }
 
-module.exports = { createDocumentAccountingPipeline };
+module.exports = { createDocumentAccountingPipeline, centsFromAmount };

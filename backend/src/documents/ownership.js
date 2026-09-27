@@ -46,7 +46,8 @@ function sourceLabel(source, action) {
 }
 
 function ownershipAllowed(documentSource, action) {
-  if (documentSource === SOURCES.OFFICE && action === ACTION_SOURCES.PORTAL_ESCRITORIO) return true;
+  // Escritório gerencia a carteira: pode excluir documentos próprios, do cliente e importados.
+  if (action === ACTION_SOURCES.PORTAL_ESCRITORIO) return true;
   if (documentSource === SOURCES.CLIENT && action === ACTION_SOURCES.PORTAL_CLIENTE) return true;
   return false;
 }

@@ -567,6 +567,7 @@ function createAccountingPeriodService({ db, id, audit, mappings }) {
         : null,
       can_export: canExport,
       can_close: canClose,
+      can_delete: canDelete(period),
       checklist,
       issues: validation.issues,
       validation_ok: validation.ok
@@ -778,6 +779,46 @@ function createAccountingPeriodService({ db, id, audit, mappings }) {
     return { period, events, exports: exportsList };
   }
 
+
+  function canDelete(period) {
+    if (!period) return false;
+    if (period.status === PERIOD_STATUSES.CLOSED || period.status === PERIOD_STATUSES.EXPORTED) return false;
+    if (period.export_id) return false;
+    return [PERIOD_STATUSES.OPEN, PERIOD_STATUSES.IN_REVIEW, PERIOD_STATUSES.READY_FOR_EXPORT].includes(period.status);
+  }
+
+  function remove(tenantId, periodId, { userId, reason, req } = {}) {
+    const period = getById(tenantId, periodId);
+    if (!period) throw fail('Competência não encontrada.', 'PERIOD_NOT_FOUND', 404);
+    if (!canDelete(period)) {
+      throw fail(
+        period.status === PERIOD_STATUSES.CLOSED
+          ? 'Competência fechada não pode ser excluída. Reabra-a se precisar alterar o ciclo.'
+          : 'Competência exportada ou com exportação vinculada não pode ser excluída.',
+        'PERIOD_DELETE_FORBIDDEN',
+        409,
+        { status: period.status, export_id: period.export_id || null }
+      );
+    }
+    const why = String(reason || '').trim();
+    run('DELETE FROM accounting_periods WHERE id=? AND tenant_id=?', periodId, tenantId);
+    if (typeof audit === 'function' && req) {
+      audit(req, PERIOD_AUDIT_ACTIONS.DELETED, 'ACCOUNTING_PERIOD', periodId, {
+        status: period.status,
+        competence: period.competence,
+        company_id: period.company_id
+      }, {
+        deleted: true,
+        company_id: period.company_id,
+        competence: period.competence,
+        status: period.status,
+        reason: why || null,
+        user_id: userId || null
+      });
+    }
+    return { ok: true, id: periodId, deleted: true, competence: period.competence, company_id: period.company_id };
+  }
+
   return {
     create,
     ensure,
@@ -792,6 +833,8 @@ function createAccountingPeriodService({ db, id, audit, mappings }) {
     validateForClosing,
     buildSummary,
     history,
+    remove,
+    canDelete,
     resolveAccountingPeriod,
     assertWritable,
     isPeriodBlocked,
